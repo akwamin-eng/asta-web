@@ -4,7 +4,7 @@ import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import * as turf from '@turf/turf';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { Sun, Moon, Layers, RotateCcw, MapPin, Hash, Search, Loader2, Brain, DollarSign, X } from 'lucide-react';
+import { Sun, Moon, Layers, RotateCcw, MapPin, Hash, Search, Loader2, Brain, DollarSign, X, Bug, MessageSquare, Send } from 'lucide-react';
 import { useLiveListings } from '../hooks/useLiveListings';
 import { useAuth } from '../hooks/useAuth';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -13,7 +13,7 @@ import AuthModal from './AuthModal';
 import PropertyInspector from './PropertyInspector';
 import type { FeatureCollection } from 'geojson';
 
-// --- PROPRIETARY DATA: THE ASTA ATLAS ---
+// --- PROPRIETARY DATA: THE ASTA ATLAS (V2.1) ---
 const ASTA_ATLAS: Record<string, { lat: number, long: number, label: string }> = {
   "ada": { lat: 5.7836, long: 0.6366, label: "Ada Foah" },
   "ada foah": { lat: 5.7836, long: 0.6366, label: "Ada Foah" },
@@ -24,7 +24,12 @@ const ASTA_ATLAS: Record<string, { lat: number, long: number, label: string }> =
   "aburi": { lat: 5.8458, long: -0.1764, label: "Aburi" },
   "akosombo": { lat: 6.2951, long: 0.0245, label: "Akosombo" },
   "dodowa": { lat: 5.8817, long: 0.0967, label: "Dodowa" },
-  "oyibi": { lat: 5.7891, long: -0.1265, label: "Oyibi" }
+  "oyibi": { lat: 5.7891, long: -0.1265, label: "Oyibi" },
+  "amasaman": { lat: 5.7042, long: -0.3019, label: "Amasaman" },
+  "airport hills": { lat: 5.6198, long: -0.1363, label: "Airport Hills" },
+  "east legon hills": { lat: 5.7333, long: -0.1167, label: "East Legon Hills" },
+  "cantonments": { lat: 5.5833, long: -0.1667, label: "Cantonments" },
+  "fadama": { lat: 5.5928, long: -0.2389, label: "Fadama" }
 };
 
 // --- STYLES ---
@@ -93,6 +98,11 @@ export default function AstaMap() {
   const [mapStyle, setMapStyle] = useState('mapbox://styles/mapbox/dark-v11');
   const [showHeatmap, setShowHeatmap] = useState(false);
   
+  // 🆕 FEEDBACK STATE
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [feedbackType, setFeedbackType] = useState<'location' | 'bug' | 'feature'>('location');
+  const [feedbackText, setFeedbackText] = useState('');
+  
   const [searchBoundary, setSearchBoundary] = useState<any>(null);
   const [showEmptyState, setShowEmptyState] = useState<{location: string, type: 'gps' | 'area' | 'atlas'} | null>(null);
 
@@ -123,9 +133,33 @@ export default function AstaMap() {
     mapRef.current?.flyTo({ center: [INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude], zoom: INITIAL_VIEW_STATE.zoom, duration: 1500 });
   };
 
-  // 🔄 REFACTORED: Now performs a full Map + Data Reset
   const handleDashboardReset = () => {
     handleReset();
+  };
+
+  // 🆕 FEEDBACK SUBMISSION
+  const submitFeedback = async () => {
+    const center = mapRef.current?.getCenter();
+    const zoom = mapRef.current?.getZoom();
+    
+    const payload = {
+        type: feedbackType,
+        message: feedbackText,
+        context: {
+            last_search: searchQuery,
+            map_center: center,
+            zoom: zoom,
+            filter_type: filterType
+        }
+    };
+    
+    // Simulate API call for now (or wire to backend)
+    console.log("Submitting Feedback:", payload);
+    
+    // Reset and Close
+    setFeedbackText('');
+    setShowFeedback(false);
+    alert("Feedback received. Our cartographers are on it.");
   };
 
   const executeSearch = async (query: string) => {
@@ -136,6 +170,26 @@ export default function AstaMap() {
     setShowSuggestions(false);
     setIsSearching(true);
 
+    // 1. IS IT A FEATURE / VIBE?
+    const allFeatures = Array.from(new Set(listings.flatMap(l => l.vibe_features.replace(/[\[\]"']/g, '').toLowerCase().split(','))));
+    const isFeature = allFeatures.some(f => f.includes(q) || q.includes(f));
+
+    if (isFeature) {
+        setSearchBoundary(null);
+        setShowEmptyState(null);
+        const matches = listings.filter(l => l.vibe_features.toLowerCase().includes(q));
+        if (matches.length > 0) {
+            const points = turf.featureCollection(matches.map(m => turf.point([m.long, m.lat])));
+            const bbox = turf.bbox(points);
+            mapRef.current?.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 100, duration: 2000, maxZoom: 14 });
+        } else {
+             alert(`No properties found with feature "${query}".`);
+        }
+        setIsSearching(false);
+        return;
+    }
+
+    // 2. CHECK ASTA ATLAS
     if (ASTA_ATLAS[q]) {
       const match = ASTA_ATLAS[q];
       setTimeout(() => {
@@ -148,6 +202,7 @@ export default function AstaMap() {
       return;
     }
 
+    // 3. CHECK GHANA POST GPS
     const ghanaPostRegex = /^[A-Z]{2}-\d{3,4}-\d{3,4}$/i; 
     if (ghanaPostRegex.test(q)) {
         setTimeout(() => {
@@ -161,30 +216,40 @@ export default function AstaMap() {
         return;
     }
 
-    const locationMatch = listings.find(l => l.location_name.toLowerCase() === q);
+    // 4. CHECK LISTING LOCATION NAMES (DB)
+    const locationMatch = listings.find(l => l.location_name.toLowerCase().includes(q));
     if (locationMatch) {
        mapRef.current?.flyTo({ center: [locationMatch.long, locationMatch.lat], zoom: 14, duration: 2000 });
        setIsSearching(false);
        return;
     }
 
+    // 5. MAPBOX FALLBACK
     try {
       const mapboxQuery = q.includes('ghana') ? q : `${q}, Ghana`;
       const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(mapboxQuery)}.json?country=gh&access_token=${MAPBOX_TOKEN}`);
       const data = await res.json();
       
       if (data.features && data.features.length > 0) {
-        const feature = data.features[0];
+        const validTypes = ['neighborhood', 'locality', 'place', 'district', 'poi', 'address'];
+        const bestMatch = data.features.find((f: any) => f.place_type.some((t: string) => validTypes.includes(t)));
+        
+        const feature = bestMatch || data.features[0];
         const [long, lat] = feature.center;
         
-        let geometry = feature.geometry;
-        if (feature.bbox) {
-          geometry = turf.bboxPolygon(feature.bbox).geometry;
-        } else {
-          geometry = turf.circle([long, lat], 2.0, { steps: 20, units: 'kilometers' }).geometry;
-        }
+        const isBroadArea = feature.place_type.some((t: string) => ['country', 'region'].includes(t));
 
-        setSearchBoundary({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry }] });
+        if (!isBroadArea) {
+             let geometry = feature.geometry;
+             if (feature.bbox) {
+                geometry = turf.bboxPolygon(feature.bbox).geometry;
+             } else {
+                geometry = turf.circle([long, lat], 2.0, { steps: 20, units: 'kilometers' }).geometry;
+             }
+             setSearchBoundary({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry }] });
+        } else {
+             setSearchBoundary(null);
+        }
         
         const hasListings = listings.some(l => 
           l.location_name.toLowerCase().includes(q) || 
@@ -200,7 +265,7 @@ export default function AstaMap() {
         if (feature.bbox) {
            mapRef.current?.fitBounds([[feature.bbox[0], feature.bbox[1]], [feature.bbox[2], feature.bbox[3]]], { padding: 100, duration: 2500 });
         } else {
-           mapRef.current?.flyTo({ center: [long, lat], zoom: 12, duration: 2500 });
+           mapRef.current?.flyTo({ center: [long, lat], zoom: isBroadArea ? 9 : 12, duration: 2500 });
         }
       } else {
          alert(`Asta Intelligence could not locate "${query}". Try adding "Ghana" or check the spelling.`);
@@ -235,7 +300,6 @@ export default function AstaMap() {
     setShowSuggestions(combined.length > 0);
   };
 
-  // 💰 PRICE PRESETS
   const applyPricePreset = (label: string) => {
     if (label === 'Budget') { setMinPrice(''); setMaxPrice('150000'); }
     if (label === 'Family') { setMinPrice('150000'); setMaxPrice('500000'); }
@@ -253,7 +317,6 @@ export default function AstaMap() {
          matchesSearch = textToSearch.includes(query);
       }
 
-      // 💰 PRICE LOGIC
       const price = l.price;
       const min = minPrice ? parseFloat(minPrice) : 0;
       const max = maxPrice ? parseFloat(maxPrice) : Infinity;
@@ -351,7 +414,76 @@ export default function AstaMap() {
             <button onClick={() => setShowHeatmap(!showHeatmap)} className={`w-[29px] h-[29px] rounded-md shadow flex items-center justify-center transition-all border ${showHeatmap ? 'bg-emerald-500 text-white border-emerald-600' : 'bg-white text-black border-gray-300 hover:bg-gray-100'}`} title="Heatmap">
                 <Layers size={16} />
             </button>
+            {/* 🆕 REPORT ISSUE BUTTON */}
+            <button onClick={() => setShowFeedback(true)} className="w-[29px] h-[29px] bg-white rounded-md shadow flex items-center justify-center hover:bg-orange-50 text-orange-500 border border-gray-300 transition-colors" title="Report Issue">
+                <Bug size={16} />
+            </button>
         </div>
+
+        {/* 🆕 FEEDBACK MODAL (BOTTOM SHEET STYLE) */}
+        <AnimatePresence>
+            {showFeedback && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <motion.div 
+                        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                        className="bg-[#1A1A1A] border border-white/10 w-full max-w-md rounded-xl shadow-2xl overflow-hidden"
+                    >
+                        <div className="p-4 border-b border-white/10 flex justify-between items-center bg-white/5">
+                            <h3 className="text-white font-bold flex items-center gap-2">
+                                <Bug className="text-orange-500 w-4 h-4" /> Report Issue
+                            </h3>
+                            <button onClick={() => setShowFeedback(false)} className="text-gray-400 hover:text-white transition-colors">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        
+                        <div className="p-4 space-y-4">
+                            <p className="text-xs text-gray-400">
+                                Help us map Ghana better. We are automatically attaching your current search coordinates.
+                            </p>
+
+                            <div className="flex gap-2">
+                                {[
+                                    { id: 'location', label: 'Wrong Map Location' },
+                                    { id: 'bug', label: 'App Bug' },
+                                    { id: 'feature', label: 'Suggestion' }
+                                ].map((type) => (
+                                    <button 
+                                        key={type.id}
+                                        onClick={() => setFeedbackType(type.id as any)}
+                                        className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded border transition-all ${feedbackType === type.id ? 'bg-orange-500 text-black border-orange-500' : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10'}`}
+                                    >
+                                        {type.label}
+                                    </button>
+                                ))}
+                            </div>
+
+                            <textarea 
+                                value={feedbackText}
+                                onChange={(e) => setFeedbackText(e.target.value)}
+                                placeholder="Tell us what's wrong..."
+                                className="w-full h-24 bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-orange-500/50 resize-none"
+                            />
+                            
+                            {searchQuery && (
+                                <div className="flex items-center gap-2 text-[10px] text-gray-500 bg-white/5 p-2 rounded">
+                                    <MapPin size={10} /> Context: "{searchQuery}"
+                                </div>
+                            )}
+
+                            <button 
+                                onClick={submitFeedback}
+                                className="w-full bg-orange-500 hover:bg-orange-400 text-black font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-colors"
+                            >
+                                <Send size={14} /> Submit Report
+                            </button>
+                        </div>
+                    </motion.div>
+                </div>
+            )}
+        </AnimatePresence>
 
         <motion.div 
           onHoverStart={() => setIsSidebarHovered(true)}
@@ -467,7 +599,7 @@ export default function AstaMap() {
                 </div>
               </div>
 
-              {/* 🆕 DASHBOARD RESET BUTTON */}
+              {/* DASHBOARD RESET BUTTON */}
               <button 
                 onClick={handleDashboardReset}
                 className="w-full mt-2 flex items-center justify-center gap-2 py-2 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/50 transition-all text-[10px] uppercase font-bold tracking-widest"
