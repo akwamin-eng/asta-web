@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '../supabaseClient'; // 👈 Updated to point to the correct file
+import { supabase } from '../supabaseClient';
 
 export function useLiveListings() {
   const [listings, setListings] = useState<any[]>([]);
