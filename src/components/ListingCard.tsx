@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { MapPin, ArrowRight, Bed, Bath, Square } from 'lucide-react';
 
@@ -23,17 +23,28 @@ interface ListingCardProps {
 // 🧹 CLEANING UTILITY
 const getCleanTags = (raw: string) => {
   if (!raw) return [];
-  // Remove brackets [], quotes "", and backslashes
   return raw.replace(/[\[\]"']/g, '')
             .split(',')
-            .map(tag => tag.trim()) // Remove extra spaces
-            .filter(tag => tag.length > 0) // Remove empty tags
-            .slice(0, 3); // Only show first 3 to avoid clutter
+            .map(tag => tag.trim())
+            .filter(tag => tag.length > 0)
+            .slice(0, 3);
 };
 
+// 🖼️ FALLBACK LUXURY ASSETS (For the Demo)
+const STOCK_IMAGES = [
+  "https://images.unsplash.com/photo-1600596542815-e32c215dd86d?auto=format&fit=crop&w=800&q=80", // Modern Villa
+  "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=800&q=80", // Pool House
+  "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80", // Bright Living
+  "https://images.unsplash.com/photo-1600047509807-ba8f99d2cdde?auto=format&fit=crop&w=800&q=80", // Tropical
+  "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=800&q=80"  // Penthouse
+];
+
 export default function ListingCard({ property, onClick, isSelected }: ListingCardProps) {
-  
   const tags = getCleanTags(property.vibe_features);
+  
+  // Deterministic fallback: Use ID to pick a consistent stock image if real one fails
+  const fallbackImage = STOCK_IMAGES[property.id % STOCK_IMAGES.length];
+  const [imgSrc, setImgSrc] = useState(property.image_url || fallbackImage);
 
   return (
     <motion.div 
@@ -52,11 +63,12 @@ export default function ListingCard({ property, onClick, isSelected }: ListingCa
       `}
     >
       {/* IMAGE SECTION */}
-      <div className="h-32 w-full relative overflow-hidden">
+      <div className="h-32 w-full relative overflow-hidden bg-gray-900">
         <img 
-          src={property.image_url || "https://via.placeholder.com/400x300?text=No+Image"} 
+          src={imgSrc} 
           alt={property.title}
-          className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+          onError={() => setImgSrc(fallbackImage)} // 🔄 Auto-fix broken links
+          className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-90 group-hover:opacity-100"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
         
@@ -92,7 +104,7 @@ export default function ListingCard({ property, onClick, isSelected }: ListingCa
           <p className="text-gray-400 text-xs font-medium truncate">{property.location_name}</p>
         </div>
 
-        {/* 🆕 CLEAN TAGS */}
+        {/* CLEAN TAGS */}
         <div className="flex flex-wrap gap-1.5">
           {tags.map((tag, i) => (
             <span 

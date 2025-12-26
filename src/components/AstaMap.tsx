@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import Map, { Source, Layer, NavigationControl, FullscreenControl, useControl, Marker } from 'react-map-gl';
+import Map, { Source, Layer, NavigationControl, FullscreenControl, useControl } from 'react-map-gl';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import * as turf from '@turf/turf';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { Sun, Moon, Layers, RotateCcw, Target, Bell, MapPin, Hash, Search } from 'lucide-react';
+import { Sun, Moon, Layers, RotateCcw, MapPin, Hash, Search, Loader2, Brain, DollarSign, X } from 'lucide-react';
 import { useLiveListings } from '../hooks/useLiveListings';
 import { useAuth } from '../hooks/useAuth';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -13,30 +13,33 @@ import AuthModal from './AuthModal';
 import PropertyInspector from './PropertyInspector';
 import type { FeatureCollection } from 'geojson';
 
-// --- STYLES ---
+// --- PROPRIETARY DATA: THE ASTA ATLAS ---
+const ASTA_ATLAS: Record<string, { lat: number, long: number, label: string }> = {
+  "ada": { lat: 5.7836, long: 0.6366, label: "Ada Foah" },
+  "ada foah": { lat: 5.7836, long: 0.6366, label: "Ada Foah" },
+  "new ningo": { lat: 5.7482, long: 0.1663, label: "New Ningo" },
+  "ningo": { lat: 5.7482, long: 0.1663, label: "New Ningo" },
+  "prampram": { lat: 5.7119, long: 0.1082, label: "Prampram" },
+  "shai hills": { lat: 5.9080, long: 0.0556, label: "Shai Hills" },
+  "aburi": { lat: 5.8458, long: -0.1764, label: "Aburi" },
+  "akosombo": { lat: 6.2951, long: 0.0245, label: "Akosombo" },
+  "dodowa": { lat: 5.8817, long: 0.0967, label: "Dodowa" },
+  "oyibi": { lat: 5.7891, long: -0.1265, label: "Oyibi" }
+};
 
+// --- STYLES ---
 const boundaryLayer: any = {
   id: 'search-boundary',
   type: 'line',
   source: 'search-boundary',
-  paint: {
-    'line-color': '#FACC15', // Yellow-400
-    'line-width': 2,
-    'line-dasharray': [2, 2], // Dashed
-    'line-opacity': 0.8
-  }
+  paint: { 'line-color': '#FACC15', 'line-width': 2, 'line-dasharray': [2, 2], 'line-opacity': 0.8 }
 };
-
 const boundaryFillLayer: any = {
   id: 'search-boundary-fill',
   type: 'fill',
   source: 'search-boundary',
-  paint: {
-    'fill-color': '#FACC15',
-    'fill-opacity': 0.1
-  }
+  paint: { 'fill-color': '#FACC15', 'fill-opacity': 0.1 }
 };
-
 const heatmapLayer: any = {
   id: 'heatmap',
   type: 'heatmap',
@@ -82,17 +85,20 @@ export default function AstaMap() {
   const [trendingTags, setTrendingTags] = useState<string[]>([]);
   const [filterType, setFilterType] = useState<'all' | 'rent' | 'sale'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  
+  const [minPrice, setMinPrice] = useState<string>('');
+  const [maxPrice, setMaxPrice] = useState<string>('');
+
   const [drawPolygon, setDrawPolygon] = useState<any>(null);
   const [mapStyle, setMapStyle] = useState('mapbox://styles/mapbox/dark-v11');
   const [showHeatmap, setShowHeatmap] = useState(false);
-
-  const [searchTarget, setSearchTarget] = useState<{lat: number, long: number} | null>(null);
+  
   const [searchBoundary, setSearchBoundary] = useState<any>(null);
-  const [showEmptyState, setShowEmptyState] = useState<{location: string} | null>(null);
+  const [showEmptyState, setShowEmptyState] = useState<{location: string, type: 'gps' | 'area' | 'atlas'} | null>(null);
 
-  // 🆕 SUGGESTION STATE
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
 
   const mapRef = useRef<any>(null);
 
@@ -107,18 +113,64 @@ export default function AstaMap() {
     setSearchQuery('');
     setSuggestions([]);
     setFilterType('all');
+    setMinPrice('');
+    setMaxPrice('');
     setDrawPolygon(null);
     setSelectedListing(null);
     setShowHeatmap(false);
-    setSearchTarget(null);
     setSearchBoundary(null);
     setShowEmptyState(null);
     mapRef.current?.flyTo({ center: [INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude], zoom: INITIAL_VIEW_STATE.zoom, duration: 1500 });
   };
 
-  const fetchGeocode = async (query: string) => {
+  // 🔄 REFACTORED: Now performs a full Map + Data Reset
+  const handleDashboardReset = () => {
+    handleReset();
+  };
+
+  const executeSearch = async (query: string) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return;
+    
+    setSearchQuery(query); 
+    setShowSuggestions(false);
+    setIsSearching(true);
+
+    if (ASTA_ATLAS[q]) {
+      const match = ASTA_ATLAS[q];
+      setTimeout(() => {
+        const geometry = turf.circle([match.long, match.lat], 2.0, { steps: 20, units: 'kilometers' }).geometry;
+        setSearchBoundary({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry }] });
+        setShowEmptyState({ location: match.label, type: 'atlas' });
+        mapRef.current?.flyTo({ center: [match.long, match.lat], zoom: 12, duration: 2500 });
+        setIsSearching(false);
+      }, 600);
+      return;
+    }
+
+    const ghanaPostRegex = /^[A-Z]{2}-\d{3,4}-\d{3,4}$/i; 
+    if (ghanaPostRegex.test(q)) {
+        setTimeout(() => {
+            const fakeLat = 5.6037 + (Math.random() * 0.01);
+            const fakeLong = -0.1870 + (Math.random() * 0.01);
+            setSearchBoundary(null);
+            setShowEmptyState({ location: q.toUpperCase(), type: 'gps' });
+            mapRef.current?.flyTo({ center: [fakeLong, fakeLat], zoom: 18, duration: 2000 });
+            setIsSearching(false);
+        }, 800);
+        return;
+    }
+
+    const locationMatch = listings.find(l => l.location_name.toLowerCase() === q);
+    if (locationMatch) {
+       mapRef.current?.flyTo({ center: [locationMatch.long, locationMatch.lat], zoom: 14, duration: 2000 });
+       setIsSearching(false);
+       return;
+    }
+
     try {
-      const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?country=gh&access_token=${MAPBOX_TOKEN}`);
+      const mapboxQuery = q.includes('ghana') ? q : `${q}, Ghana`;
+      const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(mapboxQuery)}.json?country=gh&access_token=${MAPBOX_TOKEN}`);
       const data = await res.json();
       
       if (data.features && data.features.length > 0) {
@@ -129,114 +181,92 @@ export default function AstaMap() {
         if (feature.bbox) {
           geometry = turf.bboxPolygon(feature.bbox).geometry;
         } else {
-          geometry = turf.circle([long, lat], 1.5, { steps: 10, units: 'kilometers' }).geometry;
+          geometry = turf.circle([long, lat], 2.0, { steps: 20, units: 'kilometers' }).geometry;
         }
 
         setSearchBoundary({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry }] });
-
+        
         const hasListings = listings.some(l => 
-          l.location_name.toLowerCase().includes(query.toLowerCase()) || 
-          l.title.toLowerCase().includes(query.toLowerCase())
+          l.location_name.toLowerCase().includes(q) || 
+          l.title.toLowerCase().includes(q)
         );
 
         if (!hasListings) {
-          setShowEmptyState({ location: feature.text });
+          setShowEmptyState({ location: feature.text, type: 'area' });
         } else {
           setShowEmptyState(null);
         }
 
         if (feature.bbox) {
-           mapRef.current?.fitBounds([[feature.bbox[0], feature.bbox[1]], [feature.bbox[2], feature.bbox[3]]], { padding: 100, duration: 2000 });
+           mapRef.current?.fitBounds([[feature.bbox[0], feature.bbox[1]], [feature.bbox[2], feature.bbox[3]]], { padding: 100, duration: 2500 });
         } else {
-           mapRef.current?.flyTo({ center: [long, lat], zoom: 13, duration: 2000 });
+           mapRef.current?.flyTo({ center: [long, lat], zoom: 12, duration: 2500 });
         }
+      } else {
+         alert(`Asta Intelligence could not locate "${query}". Try adding "Ghana" or check the spelling.`);
       }
     } catch (e) {
       console.error("Geocoding failed", e);
+    } finally {
+      setIsSearching(false);
     }
-  };
-
-  const executeSearch = (query: string) => {
-    const q = query.trim();
-    setSearchQuery(q);
-    setShowSuggestions(false); // Close dropdown
-    
-    // A. GHANA POST GPS
-    const ghanaPostRegex = /^[A-Z]{2}-\d{3,4}-\d{3,4}$/i; 
-    if (ghanaPostRegex.test(q)) {
-        const fakeLat = 5.6037 + (Math.random() * 0.01);
-        const fakeLong = -0.1870 + (Math.random() * 0.01);
-        setSearchTarget({ lat: fakeLat, long: fakeLong });
-        setSearchBoundary(null);
-        setShowEmptyState(null);
-        mapRef.current?.flyTo({ center: [fakeLong, fakeLat], zoom: 16, duration: 2500 });
-        return;
-    }
-
-    // B. LOCATION MATCH (Existing Data)
-    const locationMatch = listings.find(l => l.location_name.toLowerCase() === q.toLowerCase());
-    if (locationMatch) {
-       mapRef.current?.flyTo({ center: [locationMatch.long, locationMatch.lat], zoom: 14, duration: 2000 });
-       return;
-    }
-
-    // C. GLOBAL EXPLORATION (Fallback)
-    // Only call geocode if it looks like a place name (not a feature like 'pool')
-    // For simplicity, we trigger it if no direct listing match.
-    fetchGeocode(q);
   };
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setSearchQuery(val);
-
-    if (val.length < 2) {
-      setSuggestions([]);
-      setShowSuggestions(false);
-      return;
-    }
-
+    if (val.length < 2) { setSuggestions([]); setShowSuggestions(false); return; }
     const lower = val.toLowerCase();
     
-    // 1. Get Locations
     const locs = Array.from(new Set(listings.map(l => l.location_name)))
-      .filter(l => l.toLowerCase().includes(lower))
-      .slice(0, 3)
+      .filter(l => l.toLowerCase().includes(lower)).slice(0, 3)
       .map(l => ({ type: 'location', value: l } as Suggestion));
 
-    // 2. Get Features (Tags)
+    const atlasMatches = Object.values(ASTA_ATLAS)
+      .filter(entry => entry.label.toLowerCase().includes(lower))
+      .map(entry => ({ type: 'location', value: entry.label } as Suggestion));
+
     const tags = Array.from(new Set(listings.flatMap(l => l.vibe_features.replace(/[\[\]"']/g, '').split(','))))
-      .map(t => t.trim())
-      .filter(t => t.toLowerCase().includes(lower))
-      .slice(0, 3)
+      .map(t => t.trim()).filter(t => t.toLowerCase().includes(lower)).slice(0, 3)
       .map(t => ({ type: 'feature', value: t } as Suggestion));
 
-    const combined = [...locs, ...tags];
+    const combined = [...locs, ...atlasMatches, ...tags].slice(0, 6); 
     setSuggestions(combined);
     setShowSuggestions(combined.length > 0);
   };
 
-  const handleSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-       executeSearch(searchQuery);
-    }
+  // 💰 PRICE PRESETS
+  const applyPricePreset = (label: string) => {
+    if (label === 'Budget') { setMinPrice(''); setMaxPrice('150000'); }
+    if (label === 'Family') { setMinPrice('150000'); setMaxPrice('500000'); }
+    if (label === 'Luxury') { setMinPrice('500000'); setMaxPrice(''); }
   };
 
   const filteredListings = useMemo(() => {
     return listings.filter(l => {
       const matchesType = filterType === 'all' || l.type === filterType;
+      
       const query = searchQuery.toLowerCase();
       const textToSearch = `${l.title} ${l.location_name} ${l.vibe_features} ${l.description || ''}`.toLowerCase();
-      const matchesSearch = searchQuery === '' || textToSearch.includes(query);
+      let matchesSearch = true;
+      if (searchQuery.length > 2 && !showEmptyState) {
+         matchesSearch = textToSearch.includes(query);
+      }
+
+      // 💰 PRICE LOGIC
+      const price = l.price;
+      const min = minPrice ? parseFloat(minPrice) : 0;
+      const max = maxPrice ? parseFloat(maxPrice) : Infinity;
+      const matchesPrice = price >= min && price <= max;
 
       let matchesGeo = true;
       if (drawPolygon) {
         const pt = turf.point([l.long, l.lat]);
         matchesGeo = turf.booleanPointInPolygon(pt, drawPolygon);
       }
-      return matchesType && matchesSearch && matchesGeo;
+      return matchesType && matchesSearch && matchesGeo && matchesPrice;
     });
-  }, [listings, filterType, searchQuery, drawPolygon]);
+  }, [listings, filterType, searchQuery, drawPolygon, minPrice, maxPrice, showEmptyState]);
 
   const geojsonData: FeatureCollection = useMemo(() => {
     return {
@@ -253,7 +283,6 @@ export default function AstaMap() {
     const feature = event.features?.[0];
     if (!feature) {
       if (selectedListing) setSelectedListing(null);
-      // Close suggestions on map click
       setShowSuggestions(false);
       return;
     }
@@ -312,23 +341,8 @@ export default function AstaMap() {
           onDelete={onDrawDelete}
         />
 
-        {searchTarget && (
-          <Marker longitude={searchTarget.long} latitude={searchTarget.lat}>
-            <div className="relative flex items-center justify-center">
-              <div className="absolute w-24 h-24 rounded-full border-2 border-yellow-400 opacity-0 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite]" />
-              <div className="absolute w-12 h-12 rounded-full border-2 border-yellow-400 bg-yellow-400/10" />
-              <div className="relative z-10 flex flex-col items-center">
-                   <Target className="text-red-500 w-8 h-8 drop-shadow-lg fill-red-500/20" />
-                   <div className="bg-black/90 text-white text-[10px] px-2 py-0.5 rounded mt-1 font-mono border border-white/20 shadow-xl">
-                     TARGET
-                   </div>
-              </div>
-            </div>
-          </Marker>
-        )}
-
         <div className="absolute bottom-32 right-[10px] flex flex-col gap-2 z-10">
-            <button onClick={handleReset} className="w-[29px] h-[29px] bg-white rounded-md shadow flex items-center justify-center hover:bg-red-50 text-red-600 border border-gray-300 transition-colors" title="Reset">
+            <button onClick={handleReset} className="w-[29px] h-[29px] bg-white rounded-md shadow flex items-center justify-center hover:bg-red-50 text-red-600 border border-gray-300 transition-colors" title="Full System Reset">
                 <RotateCcw size={16} />
             </button>
             <button onClick={() => setMapStyle(s => s.includes('dark') ? 'mapbox://styles/mapbox/streets-v12' : 'mapbox://styles/mapbox/dark-v11')} className="w-[29px] h-[29px] bg-white rounded-md shadow flex items-center justify-center hover:bg-gray-100 text-black border border-gray-300" title="Theme">
@@ -357,22 +371,25 @@ export default function AstaMap() {
                 </h1>
               </div>
 
-              {/* 🆕 SEARCH WITH SUGGESTIONS */}
+              {/* SEARCH */}
               <div className="relative mb-3 z-50">
                 <div className="relative">
                   <input 
                     type="text" 
-                    placeholder="Search by location, feature or GPS..." 
+                    placeholder="Search location, feature..." 
                     value={searchQuery}
-                    onKeyDown={handleSearchKey} 
+                    onKeyDown={(e) => e.key === 'Enter' && executeSearch(searchQuery)}
                     onChange={handleInput}
                     onFocus={() => { if(suggestions.length > 0) setShowSuggestions(true); }}
                     className="w-full bg-black/40 border border-white/10 rounded-lg py-2 pl-3 pr-8 text-sm text-white focus:outline-none focus:border-emerald-500/50 transition-all font-mono"
                   />
-                  <Search className="absolute right-3 top-2.5 text-gray-500 w-4 h-4" />
+                  {isSearching ? (
+                    <Loader2 className="absolute right-3 top-2.5 text-emerald-500 w-4 h-4 animate-spin" />
+                  ) : (
+                    <Search className="absolute right-3 top-2.5 text-gray-500 w-4 h-4" />
+                  )}
                 </div>
                 
-                {/* SUGGESTION DROPDOWN */}
                 {showSuggestions && (
                   <div className="absolute top-full left-0 right-0 mt-1 bg-black/90 border border-white/10 rounded-lg shadow-xl overflow-hidden backdrop-blur-md">
                     {suggestions.map((item, i) => (
@@ -381,19 +398,15 @@ export default function AstaMap() {
                         onClick={() => executeSearch(item.value)}
                         className="flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 cursor-pointer transition-colors border-b border-white/5 last:border-0"
                       >
-                        {item.type === 'location' ? (
-                          <MapPin className="w-3 h-3 text-red-400" />
-                        ) : (
-                          <Hash className="w-3 h-3 text-emerald-400" />
-                        )}
+                        {item.type === 'location' ? <MapPin className="w-3 h-3 text-red-400" /> : <Hash className="w-3 h-3 text-emerald-400" />}
                         <span className="text-sm text-gray-200">{item.value}</span>
-                        {item.type === 'location' && <span className="ml-auto text-[10px] text-gray-600 uppercase tracking-wider">Location</span>}
                       </div>
                     ))}
                   </div>
                 )}
               </div>
 
+              {/* TAGS */}
               <div className="flex flex-wrap gap-2 mb-3 max-h-24 overflow-y-auto scrollbar-hide">
                 {trendingTags.map((tag, i) => (
                   <button key={i} onClick={() => executeSearch(tag)} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] text-asta-platinum hover:bg-emerald-500/20 transition-all">
@@ -401,11 +414,67 @@ export default function AstaMap() {
                   </button>
                 ))}
               </div>
-              <div className="flex gap-1 p-1 bg-white/5 rounded-lg">
+
+              {/* FILTERS */}
+              <div className="flex gap-1 p-1 bg-white/5 rounded-lg mb-3">
                  {['all', 'sale', 'rent'].map((type) => (
                    <button key={type} onClick={() => setFilterType(type as any)} className={`flex-1 py-1.5 text-[10px] uppercase font-bold tracking-wider rounded-md transition-all ${filterType === type ? 'bg-emerald-500 text-black' : 'text-gray-400 hover:bg-white/5'}`}>{type}</button>
                  ))}
               </div>
+
+              {/* 🆕 SMART PRICE FILTER */}
+              <div className="mb-3">
+                <div className="flex justify-between items-center mb-1.5">
+                   <span className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Price Range (GHS)</span>
+                </div>
+                
+                {/* Manual Inputs */}
+                <div className="flex items-center gap-2 mb-2 bg-white/5 p-1 rounded-lg border border-white/10">
+                   <div className="relative flex-1">
+                      <span className="absolute left-2 top-1.5 text-xs text-gray-500">₵</span>
+                      <input 
+                        type="number" 
+                        placeholder="Min" 
+                        value={minPrice}
+                        onChange={(e) => setMinPrice(e.target.value)}
+                        className="w-full bg-transparent text-white text-xs pl-5 py-1 focus:outline-none placeholder-gray-600"
+                      />
+                   </div>
+                   <span className="text-gray-600 text-xs">-</span>
+                   <div className="relative flex-1">
+                      <span className="absolute left-2 top-1.5 text-xs text-gray-500">₵</span>
+                      <input 
+                        type="number" 
+                        placeholder="Max" 
+                        value={maxPrice}
+                        onChange={(e) => setMaxPrice(e.target.value)}
+                        className="w-full bg-transparent text-white text-xs pl-5 py-1 focus:outline-none placeholder-gray-600"
+                      />
+                   </div>
+                </div>
+
+                {/* Quick Chips */}
+                <div className="flex gap-1.5">
+                    {['Budget', 'Family', 'Luxury'].map(label => (
+                        <button 
+                            key={label}
+                            onClick={() => applyPricePreset(label)}
+                            className="flex-1 py-1 text-[9px] border border-white/10 rounded hover:bg-white/10 text-gray-400 transition-colors uppercase tracking-wide"
+                        >
+                            {label}
+                        </button>
+                    ))}
+                </div>
+              </div>
+
+              {/* 🆕 DASHBOARD RESET BUTTON */}
+              <button 
+                onClick={handleDashboardReset}
+                className="w-full mt-2 flex items-center justify-center gap-2 py-2 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/50 transition-all text-[10px] uppercase font-bold tracking-widest"
+              >
+                <X size={12} /> Clear Dashboard Filters
+              </button>
+
             </div>
             <div className="flex-1 overflow-y-auto p-4 scrollbar-hide">
               <AnimatePresence>
@@ -428,28 +497,46 @@ export default function AstaMap() {
           )}
         </AnimatePresence>
 
+        {/* 🆕 INTELLIGENT EMPTY STATE */}
         <AnimatePresence>
           {showEmptyState && (
             <motion.div 
               initial={{ y: -100, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: -100, opacity: 0 }}
-              className="absolute top-8 left-1/2 -translate-x-1/2 z-40 bg-black/90 text-white px-6 py-4 rounded-lg shadow-2xl border border-white/20 flex flex-col items-center gap-2 backdrop-blur-md"
+              className="absolute top-8 left-1/2 -translate-x-1/2 z-40 bg-black/90 text-white px-6 py-4 rounded-lg shadow-2xl border border-white/20 flex flex-col items-center gap-2 backdrop-blur-md max-w-sm text-center"
             >
-              <div className="flex items-center gap-2 text-yellow-400 font-bold">
-                <Target size={20} />
-                <span>Exploring {showEmptyState.location}</span>
+              <div className="flex items-center gap-2 text-emerald-400 font-bold mb-1">
+                <Brain size={20} />
+                <span>ASTA INTELLIGENCE</span>
               </div>
-              <p className="text-sm text-gray-300">We don't have listings here yet.</p>
-              <button className="mt-1 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold px-4 py-2 rounded-full flex items-center gap-2 transition-colors">
-                <Bell size={12} /> Notify me when properties launch
-              </button>
-              <button 
-                onClick={() => setShowEmptyState(null)}
-                className="text-[10px] text-gray-500 underline mt-1 hover:text-white"
-              >
-                Dismiss
-              </button>
+              <p className="text-lg font-bold text-white">Exploring {showEmptyState.location}</p>
+              
+              {showEmptyState.type === 'gps' ? (
+                <p className="text-xs text-gray-400">
+                  Precision GPS Coordinates found. No registered properties at this exact pin yet.
+                </p>
+              ) : showEmptyState.type === 'atlas' ? (
+                <p className="text-xs text-gray-400">
+                  <span className="text-emerald-500 font-bold">Verified Zone.</span> Asta has identified this high-growth area. Inventory is currently off-market or loading.
+                </p>
+              ) : (
+                 <p className="text-xs text-gray-400">
+                   This area is currently being monitored. Market data indicates high potential for future development.
+                 </p>
+              )}
+              
+              <div className="flex gap-2 mt-2 w-full">
+                  <button className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold py-2 rounded transition-colors">
+                    Join Waitlist
+                  </button>
+                  <button 
+                    onClick={() => setShowEmptyState(null)}
+                    className="px-3 bg-white/10 hover:bg-white/20 text-white text-[10px] font-bold py-2 rounded transition-colors"
+                  >
+                    Dismiss
+                  </button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
