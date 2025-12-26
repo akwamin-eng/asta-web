@@ -2,18 +2,18 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Map, { 
   Source, 
   Layer, 
-  Popup, 
   NavigationControl
 } from 'react-map-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useLiveListings } from '../hooks/useLiveListings';
-import { useAuth } from '../hooks/useAuth'; // 🆕
+import { useAuth } from '../hooks/useAuth';
 import { AnimatePresence, motion } from 'framer-motion';
 import ListingCard from './ListingCard';
-import AuthModal from './AuthModal'; // 🆕
+import AuthModal from './AuthModal';
+import PropertyInspector from './PropertyInspector';
 import type { FeatureCollection } from 'geojson';
 
-// --- STYLES (Identical to before) ---
+// --- STYLES (Unchanged) ---
 const clusterLayer: any = {
   id: 'clusters',
   type: 'circle',
@@ -67,7 +67,6 @@ const priceLabelLayer: any = {
   }
 };
 
-// --- TYPES ---
 interface Property {
   id: number;
   title: string;
@@ -81,42 +80,64 @@ interface Property {
 }
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
+const ENGINE_URL = "http://127.0.0.1:8000"; 
 
 export default function AstaMap() {
   const { listings, newAlert } = useLiveListings();
-  const { user, signOut } = useAuth(); // 🆕
-  const [isAuthModalOpen, setAuthModalOpen] = useState(false); // 🆕
+  const { user, signOut } = useAuth();
+  const [isAuthModalOpen, setAuthModalOpen] = useState(false);
   const [selectedListing, setSelectedListing] = useState<Property | null>(null);
   
+  // UX States
+  const [isSidebarHovered, setIsSidebarHovered] = useState(true); // Default open so they know it exists
+  const [trendingTags, setTrendingTags] = useState<string[]>([]);
+  const [filterType, setFilterType] = useState<'all' | 'rent' | 'sale'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  
   const mapRef = useRef<any>(null);
+
+  useEffect(() => {
+    fetch(`${ENGINE_URL}/api/trends`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.trending_tags) setTrendingTags(data.trending_tags);
+      })
+      .catch(err => console.error("Engine Offline:", err));
+  }, []);
+
+  const filteredListings = useMemo(() => {
+    return listings.filter(l => {
+      const matchesType = filterType === 'all' || l.type === filterType;
+      const query = searchQuery.toLowerCase();
+      const matchesSearch = 
+        l.title?.toLowerCase().includes(query) || 
+        l.location_name?.toLowerCase().includes(query) ||
+        l.vibe_features?.toLowerCase().includes(query);
+      return matchesType && matchesSearch;
+    });
+  }, [listings, filterType, searchQuery]);
 
   const geojsonData: FeatureCollection = useMemo(() => {
     return {
       type: 'FeatureCollection',
-      features: listings.map(l => ({
+      features: filteredListings.map(l => ({
         type: 'Feature',
         properties: { ...l, price_formatted: (l.price / 1000).toFixed(0) + 'k' },
         geometry: { type: 'Point', coordinates: [l.long, l.lat] }
       }))
     };
-  }, [listings]);
+  }, [filteredListings]);
 
-  useEffect(() => {
-    if (listings.length > 0 && mapRef.current) {
-      const longs = listings.map(l => l.long);
-      const lats = listings.map(l => l.lat);
-      try {
-        mapRef.current.fitBounds(
-          [[Math.min(...longs) - 0.05, Math.min(...lats) - 0.05], [Math.max(...longs) + 0.05, Math.max(...lats) + 0.05]],
-          { padding: 40, duration: 2000 }
-        );
-      } catch (err) { }
-    }
-  }, [listings.length]);
-
+  // Handle Map Clicks (Close Inspector if clicking background)
   const onClickMap = (event: any) => {
     const feature = event.features?.[0];
-    if (!feature) return;
+    
+    // If clicking empty map -> Close Inspector
+    if (!feature) {
+      if (selectedListing) setSelectedListing(null);
+      return;
+    }
+
     const clusterId = feature.properties.cluster_id;
     if (clusterId) {
       const mapboxSource = mapRef.current?.getSource('listings');
@@ -126,11 +147,12 @@ export default function AstaMap() {
       });
       return;
     }
+
     const propId = feature.properties.id;
     const property = listings.find(l => l.id === propId);
     if (property) {
       setSelectedListing(property);
-      mapRef.current?.flyTo({ center: [property.long, property.lat], zoom: 15, duration: 1000 });
+      mapRef.current?.flyTo({ center: [property.long, property.lat], zoom: 16, duration: 1500 });
     }
   };
 
@@ -140,53 +162,10 @@ export default function AstaMap() {
   };
 
   return (
-    <div className="flex h-screen w-full bg-asta-deep font-sans overflow-hidden">
+    <div className="relative h-screen w-full bg-asta-deep font-sans overflow-hidden">
       
-      {/* 🟢 LEFT PANEL */}
-      <div className="w-[400px] flex flex-col border-r border-white/10 z-20 bg-asta-deep shadow-2xl">
-        <div className="p-6 border-b border-white/10 bg-asta-deep/95 backdrop-blur flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
-              ASTA <span className="text-asta-platinum font-light">LIVE</span>
-            </h1>
-            <p className="text-xs text-gray-500 mt-1 font-mono">
-              {listings.length} PROPERTIES
-            </p>
-          </div>
-          
-          {/* 🆕 AUTH BUTTON */}
-          {user ? (
-             <div className="flex flex-col items-end">
-                <span className="text-xs text-emerald-400 font-bold">Logged In</span>
-                <button onClick={signOut} className="text-xs text-gray-500 hover:text-white underline">Sign Out</button>
-             </div>
-          ) : (
-            <button 
-              onClick={() => setAuthModalOpen(true)}
-              className="bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3 py-2 rounded-lg transition-all"
-            >
-              Sign In
-            </button>
-          )}
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 scrollbar-hide">
-          <AnimatePresence>
-            {listings.map((property) => (
-              <ListingCard 
-                key={property.id} 
-                property={property as any} 
-                isSelected={selectedListing?.id === property.id}
-                onClick={() => onSidebarSelect(property as any)}
-              />
-            ))}
-          </AnimatePresence>
-        </div>
-      </div>
-
-      {/* 🗺️ RIGHT PANEL */}
-      <div className="flex-1 relative">
+      {/* 🗺️ MAP (Now Full Screen Background) */}
+      <div className="absolute inset-0 z-0">
         <Map
           ref={mapRef}
           initialViewState={{ longitude: -0.1870, latitude: 5.6037, zoom: 11 }}
@@ -203,33 +182,125 @@ export default function AstaMap() {
             <Layer {...priceLabelLayer} />
           </Source>
           <NavigationControl position="bottom-right" />
-          {selectedListing && (
-            <Popup longitude={selectedListing.long} latitude={selectedListing.lat} anchor="top" onClose={() => setSelectedListing(null)} closeButton={false} className="z-50 text-black" maxWidth="300px" offset={15}>
-              <div className="bg-asta-deep text-white rounded-lg overflow-hidden w-64 border border-asta-platinum/20">
-                <div className="h-32 bg-gray-800 relative">
-                  <img src={selectedListing.image_url || "https://via.placeholder.com/400x300?text=Asta"} className="w-full h-full object-cover" />
-                  <div className="absolute top-2 right-2 bg-black/60 px-2 py-1 rounded text-[10px] uppercase font-bold">{selectedListing.type}</div>
-                </div>
-                <div className="p-3">
-                  <h3 className="font-bold text-md truncate">{selectedListing.title}</h3>
-                  <p className="text-asta-platinum text-xs mb-2">{selectedListing.location_name}</p>
-                  <span className="text-xl font-bold">₵{selectedListing.price?.toLocaleString()}</span>
-                </div>
-              </div>
-            </Popup>
-          )}
         </Map>
-        <AnimatePresence>
-          {newAlert && (
-            <motion.div initial={{ y: -100, opacity: 0 }} animate={{ y: 20, opacity: 1 }} exit={{ y: -100, opacity: 0 }} className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-black px-6 py-2 rounded-full shadow-2xl font-bold flex items-center gap-2">
-              <span>🔔 New Listing in {newAlert.location_name}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        
-        {/* 🆕 AUTH MODAL */}
-        <AuthModal isOpen={isAuthModalOpen} onClose={() => setAuthModalOpen(false)} />
       </div>
+
+      {/* 👻 GHOST DASHBOARD (Left) */}
+      <motion.div 
+        onHoverStart={() => setIsSidebarHovered(true)}
+        onHoverEnd={() => setIsSidebarHovered(false)}
+        animate={{ 
+          x: isSidebarHovered ? 0 : -360,
+          opacity: isSidebarHovered ? 1 : 0.8 
+        }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+        className="absolute left-0 top-0 bottom-0 w-[400px] z-20 flex"
+      >
+        {/* The Actual Dashboard Content */}
+        <div className="flex-1 flex flex-col bg-asta-deep/90 backdrop-blur-md border-r border-white/10 shadow-2xl h-full">
+          
+          {/* Header & Filters */}
+          <div className="p-4 border-b border-white/10">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+                  ASTA <span className="text-asta-platinum font-light">LIVE</span>
+                </h1>
+                <p className="text-xs text-gray-500 mt-1 font-mono">
+                  {filteredListings.length} Active
+                </p>
+              </div>
+              {user ? (
+                 <button onClick={signOut} className="text-[10px] text-gray-600 hover:text-white uppercase font-bold tracking-widest">Logout</button>
+              ) : (
+                <button onClick={() => setAuthModalOpen(true)} className="text-[10px] text-emerald-500/50 hover:text-emerald-400 uppercase font-bold tracking-widest">Login</button>
+              )}
+            </div>
+
+            {/* Search */}
+            <div className="relative mb-3">
+              <input 
+                type="text" 
+                placeholder="Search location..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-black/40 border border-white/10 rounded-lg py-2 px-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-emerald-500/50 transition-all font-mono"
+              />
+            </div>
+
+            {/* 🆕 WRAPPING TAGS */}
+            <div className="flex flex-wrap gap-2 mb-3 max-h-24 overflow-y-auto scrollbar-hide">
+              {trendingTags.map((tag, i) => (
+                <button 
+                  key={i}
+                  onClick={() => setSearchQuery(tag)}
+                  className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] text-asta-platinum hover:bg-emerald-500/20 hover:border-emerald-500/50 transition-all"
+                >
+                  #{tag}
+                </button>
+              ))}
+            </div>
+
+            {/* TABS */}
+            <div className="flex gap-1 p-1 bg-white/5 rounded-lg">
+               {['all', 'sale', 'rent'].map((type) => (
+                 <button
+                   key={type}
+                   onClick={() => setFilterType(type as any)}
+                   className={`
+                     flex-1 py-1.5 text-[10px] uppercase font-bold tracking-wider rounded-md transition-all
+                     ${filterType === type 
+                       ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20' 
+                       : 'text-gray-400 hover:bg-white/5 hover:text-white'}
+                   `}
+                 >
+                   {type}
+                 </button>
+               ))}
+            </div>
+          </div>
+
+          {/* Feed */}
+          <div className="flex-1 overflow-y-auto p-4 scrollbar-hide">
+            <AnimatePresence>
+              {filteredListings.map((property) => (
+                <ListingCard 
+                  key={property.id} 
+                  property={property as any} 
+                  isSelected={selectedListing?.id === property.id}
+                  onClick={() => onSidebarSelect(property as any)}
+                />
+              ))}
+            </AnimatePresence>
+          </div>
+        </div>
+
+        {/* The "Handle" (Visible when collapsed) */}
+        <div className="w-10 h-full flex items-center justify-center cursor-pointer group">
+           <div className="w-1 h-12 bg-white/20 rounded-full group-hover:bg-emerald-500 transition-all" />
+        </div>
+      </motion.div>
+
+      {/* 🕵️ RIGHT INSPECTOR */}
+      <AnimatePresence>
+        {selectedListing && (
+          <PropertyInspector 
+            property={selectedListing} 
+            onClose={() => setSelectedListing(null)} 
+          />
+        )}
+      </AnimatePresence>
+      
+      {/* Notifications & Modals */}
+      <AnimatePresence>
+        {newAlert && (
+          <motion.div initial={{ y: -100, opacity: 0 }} animate={{ y: 20, opacity: 1 }} exit={{ y: -100, opacity: 0 }} className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-black px-6 py-2 rounded-full shadow-2xl font-bold flex items-center gap-2">
+            <span>🔔 New Listing in {newAlert.location_name}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AuthModal isOpen={isAuthModalOpen} onClose={() => setAuthModalOpen(false)} />
     </div>
   );
 }
