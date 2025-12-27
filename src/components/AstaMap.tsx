@@ -34,6 +34,8 @@ import {
   ChevronUp,
   ChevronDown,
   LogIn,
+  LayoutDashboard,
+  User
 } from "lucide-react";
 import { useLiveListings } from "../hooks/useLiveListings";
 import { useAuth } from "../hooks/useAuth";
@@ -41,6 +43,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import ListingCard from "./ListingCard";
 import AuthModal from "./AuthModal";
 import PropertyInspector from "./PropertyInspector";
+import AstaDossier from "./profile/AstaDossier";
 import type { FeatureCollection } from "geojson";
 
 // --- PROPRIETARY DATA: THE ASTA ATLAS (V2.1) ---
@@ -226,6 +229,7 @@ export default function AstaMap() {
   const { user } = useAuth();
 
   const [isAuthModalOpen, setAuthModalOpen] = useState(false);
+  const [isProfileOpen, setProfileOpen] = useState(false); // <--- NEW STATE
   const [selectedListing, setSelectedListing] = useState<Property | null>(null);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const [isMobileExpanded, setIsMobileExpanded] = useState(false);
@@ -747,12 +751,26 @@ export default function AstaMap() {
                   ASTA{" "}
                   <span className="text-asta-platinum font-light">LIVE</span>
                 </h1>
-                <button
-                  onClick={() => setAuthModalOpen(true)}
-                  className="ml-auto text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
-                >
-                  <LogIn size={10} /> LOG IN
-                </button>
+                
+                {/* --- UPDATE: DYNAMIC LOGIN / DOSSIER BUTTON --- */}
+                <div className="ml-auto">
+                   {user ? (
+                      <button 
+                        onClick={() => setProfileOpen(true)}
+                        className="text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
+                      >
+                         <LayoutDashboard size={12} /> DOSSIER
+                      </button>
+                   ) : (
+                      <button
+                        onClick={() => setAuthModalOpen(true)}
+                        className="text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
+                      >
+                        <LogIn size={10} /> LOG IN
+                      </button>
+                   )}
+                </div>
+
               </div>
 
               <div className="relative mb-3 z-50">
@@ -964,12 +982,37 @@ export default function AstaMap() {
 
         <AnimatePresence>
           {selectedListing && (
-            <div className="absolute top-0 right-0 h-full z-30 pointer-events-auto w-full md:w-[400px]">
-              <PropertyInspector
-                property={selectedListing}
-                onClose={() => setSelectedListing(null)}
-              />
-            </div>
+            <PropertyInspector
+              property={selectedListing}
+              onClose={() => setSelectedListing(null)}
+            />
+          )}
+        </AnimatePresence>
+        
+        {/* --- UPDATE: PROFILE DOSSIER OVERLAY --- */}
+        <AnimatePresence>
+          {isProfileOpen && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.98 }}
+              className="fixed inset-0 z-[100] bg-[#050505] flex flex-col"
+            >
+               {/* Close Header */}
+               <div className="flex justify-end p-4 border-b border-white/10">
+                  <button 
+                    onClick={() => setProfileOpen(false)} 
+                    className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-white/10 rounded-full"
+                  >
+                    <X size={24} />
+                  </button>
+               </div>
+               
+               {/* Main Dossier Content */}
+               <div className="flex-1 overflow-hidden">
+                  <AstaDossier />
+               </div>
+            </motion.div>
           )}
         </AnimatePresence>
 
