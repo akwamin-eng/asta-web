@@ -43,7 +43,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import ListingCard from "./ListingCard";
 import AuthModal from "./AuthModal";
 import PropertyInspector from "./PropertyInspector";
-import AstaDossier from "./profile/AstaDossier";
+import UnifiedCommandCenter from "./profile/UnifiedCommandCenter";
 import type { FeatureCollection } from "geojson";
 
 // --- PROPRIETARY DATA: THE ASTA ATLAS (V2.1) ---
@@ -229,7 +229,7 @@ export default function AstaMap() {
   const { user } = useAuth();
 
   const [isAuthModalOpen, setAuthModalOpen] = useState(false);
-  const [isProfileOpen, setProfileOpen] = useState(false); // <--- NEW STATE
+  const [isProfileOpen, setProfileOpen] = useState(false);
   const [selectedListing, setSelectedListing] = useState<Property | null>(null);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const [isMobileExpanded, setIsMobileExpanded] = useState(false);
@@ -531,7 +531,6 @@ export default function AstaMap() {
 
   const filteredListings = useMemo(() => {
     return listings.filter((l) => {
-      // 🛡️ DATA HYGIENE: Filter out bad data (Ocean/Null Price) to prevent Mapbox crash
       if (!l.price || l.lat === 0) return false;
 
       const matchesType = filterType === "all" || l.type === filterType;
@@ -752,7 +751,6 @@ export default function AstaMap() {
                   <span className="text-asta-platinum font-light">LIVE</span>
                 </h1>
                 
-                {/* --- UPDATE: DYNAMIC LOGIN / DOSSIER BUTTON --- */}
                 <div className="ml-auto">
                    {user ? (
                       <button 
@@ -989,30 +987,9 @@ export default function AstaMap() {
           )}
         </AnimatePresence>
         
-        {/* --- UPDATE: PROFILE DOSSIER OVERLAY --- */}
         <AnimatePresence>
           {isProfileOpen && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.98 }}
-              className="fixed inset-0 z-[100] bg-[#050505] flex flex-col"
-            >
-               {/* Close Header */}
-               <div className="flex justify-end p-4 border-b border-white/10">
-                  <button 
-                    onClick={() => setProfileOpen(false)} 
-                    className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-white/10 rounded-full"
-                  >
-                    <X size={24} />
-                  </button>
-               </div>
-               
-               {/* Main Dossier Content */}
-               <div className="flex-1 overflow-hidden">
-                  <AstaDossier />
-               </div>
-            </motion.div>
+            <UnifiedCommandCenter onClose={() => setProfileOpen(false)} />
           )}
         </AnimatePresence>
 
