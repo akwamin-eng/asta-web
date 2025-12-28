@@ -35,7 +35,7 @@ import {
   ChevronDown,
   LogIn,
   LayoutDashboard,
-  User
+  User,
 } from "lucide-react";
 import { useLiveListings } from "../hooks/useLiveListings";
 import { useAuth } from "../hooks/useAuth";
@@ -44,6 +44,7 @@ import ListingCard from "./ListingCard";
 import AuthModal from "./AuthModal";
 import PropertyInspector from "./PropertyInspector";
 import UnifiedCommandCenter from "./dossier/UnifiedCommandCenter";
+import FieldReportModal from "./dossier/FieldReportModal"; // NEW IMPORT
 import type { FeatureCollection } from "geojson";
 
 // --- PROPRIETARY DATA: THE ASTA ATLAS (V2.1) ---
@@ -231,6 +232,13 @@ export default function AstaMap() {
   const [isAuthModalOpen, setAuthModalOpen] = useState(false);
   const [isProfileOpen, setProfileOpen] = useState(false);
   const [selectedListing, setSelectedListing] = useState<Property | null>(null);
+
+  // NEW: State for the Field Report Modal
+  const [verifyingProp, setVerifyingProp] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const [isMobileExpanded, setIsMobileExpanded] = useState(false);
 
@@ -750,25 +758,24 @@ export default function AstaMap() {
                   ASTA{" "}
                   <span className="text-asta-platinum font-light">LIVE</span>
                 </h1>
-                
-                <div className="ml-auto">
-                   {user ? (
-                      <button 
-                        onClick={() => setProfileOpen(true)}
-                        className="text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
-                      >
-                         <LayoutDashboard size={12} /> DOSSIER
-                      </button>
-                   ) : (
-                      <button
-                        onClick={() => setAuthModalOpen(true)}
-                        className="text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
-                      >
-                        <LogIn size={10} /> LOG IN
-                      </button>
-                   )}
-                </div>
 
+                <div className="ml-auto">
+                  {user ? (
+                    <button
+                      onClick={() => setProfileOpen(true)}
+                      className="text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
+                    >
+                      <LayoutDashboard size={12} /> DOSSIER
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setAuthModalOpen(true)}
+                      className="text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
+                    >
+                      <LogIn size={10} /> LOG IN
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="relative mb-3 z-50">
@@ -983,10 +990,16 @@ export default function AstaMap() {
             <PropertyInspector
               property={selectedListing}
               onClose={() => setSelectedListing(null)}
+              onVerify={() =>
+                setVerifyingProp({
+                  id: selectedListing.id.toString(),
+                  title: selectedListing.title,
+                })
+              }
             />
           )}
         </AnimatePresence>
-        
+
         <AnimatePresence>
           {isProfileOpen && (
             <UnifiedCommandCenter onClose={() => setProfileOpen(false)} />
@@ -1020,6 +1033,21 @@ export default function AstaMap() {
                 </button>
               </div>
             </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* NEW: Field Report Modal Overlay */}
+        <AnimatePresence>
+          {verifyingProp && (
+            <FieldReportModal
+              propertyId={verifyingProp.id}
+              propertyTitle={verifyingProp.title}
+              onClose={() => setVerifyingProp(null)}
+              onSuccess={() => {
+                // Optional: Trigger a system-wide refresh or toast
+                // console.log("Report filed, reputation updated.");
+              }}
+            />
           )}
         </AnimatePresence>
 

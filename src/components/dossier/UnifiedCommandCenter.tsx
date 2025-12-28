@@ -1,12 +1,14 @@
-import React, { useState } from "react";
-import { motion } from "framer-motion";
+import React, { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { X, Activity, Layout, Mail, Loader2 } from "lucide-react";
 import IdentityModule from "./IdentityModule";
 import SmartWatchlist from "./SmartWatchlist";
 import HunterPreferences from "./HunterPreferences";
 import Dashboard from "../Dashboard";
 import SecureInbox from "./SecureInbox";
+import OnboardingModule from './OnboardingModule';
 import { useProfile } from "../../hooks/useProfile";
+import { useHunterIntel } from "../../hooks/useHunterIntel";
 
 interface UCCProps {
   onClose: () => void;
@@ -22,8 +24,23 @@ export default function UnifiedCommandCenter({ onClose }: UCCProps) {
     removeFromWatchlist,
   } = useProfile();
 
-  // STATE: View Mode (Dashboard vs Inbox)
+  // FETCH INTEL + MARK AS READ FUNCTION
+  const { messages, loading: intelLoading, markAsRead } = useHunterIntel(profile);
+
+  // CALCULATE UNREAD COUNT (Dynamic)
+  const unreadCount = messages.filter(m => m.status === 'unread').length;
+  const hasUnread = unreadCount > 0;
+
   const [viewMode, setViewMode] = useState<"dashboard" | "comms">("dashboard");
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  useEffect(() => {
+    if (profile && !loading) {
+      if (!profile.full_name || profile.full_name === 'Lead Scout' || profile.full_name === 'Observer') {
+        setShowOnboarding(true);
+      }
+    }
+  }, [profile, loading]);
 
   if (loading) {
     return (
@@ -40,6 +57,15 @@ export default function UnifiedCommandCenter({ onClose }: UCCProps) {
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-[100] bg-[#050505]/95 backdrop-blur-xl flex flex-col overflow-hidden font-sans"
     >
+      <AnimatePresence>
+        {showOnboarding && (
+          <OnboardingModule 
+            currentName={profile?.full_name || ''} 
+            onComplete={() => setShowOnboarding(false)} 
+          />
+        )}
+      </AnimatePresence>
+
       {/* --- HEADER --- */}
       <header className="h-16 border-b border-white/10 flex items-center justify-between px-6 bg-black/40 shrink-0">
         <div className="flex items-center gap-6">
@@ -50,7 +76,6 @@ export default function UnifiedCommandCenter({ onClose }: UCCProps) {
             </h1>
           </div>
 
-          {/* --- THE TOGGLE BUTTONS (Clean) --- */}
           <div className="flex bg-white/5 rounded-lg p-1 border border-white/10">
             <button
               onClick={() => setViewMode("dashboard")}
@@ -63,17 +88,28 @@ export default function UnifiedCommandCenter({ onClose }: UCCProps) {
               <Layout size={12} />{" "}
               <span className="hidden xs:inline">Dashboard</span>
             </button>
-            <button
-              onClick={() => setViewMode("comms")}
-              className={`px-3 md:px-4 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-2 ${
-                viewMode === "comms"
-                  ? "bg-blue-600 text-white shadow-lg"
-                  : "text-gray-400 hover:text-white"
-              }`}
-            >
-              <Mail size={12} />{" "}
-              <span className="hidden xs:inline">Comms Link</span>
-            </button>
+            
+            <div className="relative">
+              <button
+                onClick={() => setViewMode("comms")}
+                className={`relative px-3 md:px-4 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-2 ${
+                  viewMode === "comms"
+                    ? "bg-blue-600 text-white shadow-lg"
+                    : hasUnread 
+                      ? "bg-blue-900/30 text-blue-400 border border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.5)] animate-pulse"
+                      : "text-gray-400 hover:text-white"
+                }`}
+              >
+                <Mail size={12} />{" "}
+                <span className="hidden xs:inline">Comms Link</span>
+                
+                {hasUnread && (
+                  <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white text-[9px] flex items-center justify-center rounded-full border border-black shadow-sm font-mono animate-bounce">
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -98,12 +134,10 @@ export default function UnifiedCommandCenter({ onClose }: UCCProps) {
       {/* --- MAIN CONTENT --- */}
       <main className="flex-1 overflow-y-auto p-6 scrollbar-hide">
         <div className="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* LEFT: IDENTITY & CONFIG */}
           <div className="lg:col-span-3 space-y-6">
             <div className="h-fit">
               <IdentityModule profile={profile} />
             </div>
-            {/* FORCE HEIGHT so the config card isn't squashed */}
             <div className="min-h-[400px]">
               <HunterPreferences
                 preferences={preferences}
@@ -112,7 +146,6 @@ export default function UnifiedCommandCenter({ onClose }: UCCProps) {
             </div>
           </div>
 
-          {/* CENTER: DASHBOARD or INBOX */}
           <div className="lg:col-span-6 space-y-6">
             <div className="bg-black/40 border border-white/10 rounded-xl overflow-hidden flex flex-col h-[700px] relative">
               {viewMode === "dashboard" ? (
@@ -132,12 +165,16 @@ export default function UnifiedCommandCenter({ onClose }: UCCProps) {
                   </div>
                 </>
               ) : (
-                <SecureInbox profile={profile} />
+                // PASS DOWN markAsRead
+                <SecureInbox 
+                  messages={messages} 
+                  loading={intelLoading} 
+                  onRead={markAsRead} 
+                />
               )}
             </div>
           </div>
 
-          {/* RIGHT: WATCHLIST */}
           <div className="lg:col-span-3 h-full">
             <div className="h-full">
               <SmartWatchlist
