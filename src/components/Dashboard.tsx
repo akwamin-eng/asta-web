@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShieldCheck, AlertTriangle, TrendingUp, Activity, ArrowLeft, Loader2, Map } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useMarketIntel } from '../hooks/useMarketIntel';
@@ -14,11 +14,30 @@ import NeighborhoodLeaderboard from './modules/dashboard/NeighborhoodLeaderboard
 
 export default function Dashboard() {
   const { totalAssets, avgRent, verifiedCount, trustData, hotNeighborhoods, isLoading } = useMarketIntel();
+  
+  // FIX: Add a local 'ready' state to delay rendering charts until layout is stable
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    // Wait 300ms for the slide-over animation to finish before calculating chart sizes
+    const timer = setTimeout(() => setReady(true), 300);
+    return () => clearTimeout(timer);
+  }, []);
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-[#050505] flex items-center justify-center text-emerald-500">
         <Loader2 className="animate-spin" size={32} />
+      </div>
+    );
+  }
+
+  // Prevent Recharts "width(-1)" error by showing a loader during animation
+  if (!ready) {
+    return (
+      <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center text-emerald-500/50 space-y-2">
+        <Loader2 className="animate-spin" size={24} />
+        <p className="text-xs font-mono uppercase">Stabilizing Market Feed...</p>
       </div>
     );
   }

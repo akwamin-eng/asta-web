@@ -43,7 +43,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import ListingCard from "./ListingCard";
 import AuthModal from "./AuthModal";
 import PropertyInspector from "./PropertyInspector";
-import UnifiedCommandCenter from "./profile/UnifiedCommandCenter";
+import UnifiedCommandCenter from "./dossier/UnifiedCommandCenter";
 import type { FeatureCollection } from "geojson";
 
 // --- PROPRIETARY DATA: THE ASTA ATLAS (V2.1) ---

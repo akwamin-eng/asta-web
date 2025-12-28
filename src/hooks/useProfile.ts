@@ -1,100 +1,106 @@
-import { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
-import { useAuth } from './useAuth';
-import type { UserProfile, WatchlistItem, HunterPreferences } from '../types/asta_types';
+import { useEffect, useState, useCallback } from 'react';
+import { supabase } from '../lib/supabase'; // This now uses the simplified singleton
+import type { UserProfile, HunterPreferences, WatchlistItem } from '../types/asta_types';
 
 export function useProfile() {
-  const { user } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [preferences, setPreferences] = useState<HunterPreferences>({
-    locations: ['East Legon', 'Cantonments'],
-    min_price: 0,
-    max_price: 15000,
-    property_type: 'rent',
-    whatsapp_alerts: true
+    locations: [],
+    budget_max: 500000,
+    property_type: [],
+    lifestyle_tags: [],
+    alerts_enabled: true,
+    deal_trigger_percent: 5
   });
   const [loading, setLoading] = useState(true);
 
+  // LOG 1: Verify the hook is mounting
   useEffect(() => {
-    if (user) {
-      fetchDossier();
-    } else {
-      setLoading(false);
-    }
-  }, [user]);
+    console.warn("⚠️ HOOK MOUNTED: useProfile is active.");
+  }, []);
 
-  async function fetchDossier() {
+  const fetchDossier = useCallback(async () => {
     try {
       setLoading(true);
       
-      // 1. Fetch Profile
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user?.id)
-        .single();
-
-      if (!profileError && profileData) {
-        setProfile({
-          id: profileData.id,
-          full_name: profileData.full_name || user?.email?.split('@')[0] || 'Scout',
-          email: profileData.email || user?.email || '',
-          avatar_url: profileData.avatar_url,
-          reputation_score: profileData.reputation_score || 150,
-          rank_title: profileData.rank_title as any || 'Scout',
-          impact_stat: 12,
-          joined_at: profileData.created_at
-        });
-      } else {
-        // Fallback for new users without a profile record yet
-        setProfile({
-          id: user?.id || '',
-          full_name: user?.email?.split('@')[0] || 'New Scout',
-          email: user?.email || '',
-          reputation_score: 50,
-          rank_title: 'Observer',
-          impact_stat: 0,
-          joined_at: new Date().toISOString()
-        });
+      // LOG 2: Check Session
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        console.warn("⚠️ NO SESSION: Supabase reports no active user.");
+        setLoading(false);
+        return;
       }
 
-      // 2. Fetch Watchlist (Mocked for now to show the UI)
-      setWatchlist([
-        {
-          id: 1,
-          property_id: 101,
-          title: "Modern 2-Bed Suite",
-          location_name: "East Legon",
-          current_price: 4500,
-          original_price: 5000,
-          image_url: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c",
-          status: 'active',
-          vibe_status: 'verified'
-        }
-      ]);
+      console.warn(`⚠️ SESSION FOUND: User ID is ${session.user.id}`);
 
-    } catch (e) {
-      console.error('Dossier Error:', e);
+      // 1. Fetch Profile
+      const { data: profileData, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .maybeSingle();
+
+      if (error) console.error("❌ DB ERROR:", error.message);
+      
+      if (profileData) {
+        console.warn("⚠️ DATA RECEIVED: Profile loaded successfully.");
+        setProfile(profileData);
+        if (profileData.preferences) {
+          setPreferences(prev => ({ ...prev, ...profileData.preferences }));
+        }
+      } else {
+        console.warn("⚠️ DATA EMPTY: Profile row is missing.");
+      }
+
+      // 2. Fetch Watchlist
+      const { data: savedData } = await supabase
+        .from('saved_properties')
+        .select('*, property:properties(*)')
+        .eq('user_id', session.user.id);
+
+      if (savedData) {
+        const formatted = savedData
+          .filter((item: any) => item.property)
+          .map((item: any) => ({
+            id: item.id,
+            property_id: item.property.id,
+            title: item.property.title,
+            location: item.property.location_name,
+            current_price: item.property.price,
+            original_price: item.property.price,
+            image_url: item.property.cover_image_url,
+            added_at: item.created_at
+          }));
+        setWatchlist(formatted);
+      }
+
+    } catch (err) {
+      console.error('CRITICAL FAILURE:', err);
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  const updatePreferences = async (newPrefs: HunterPreferences) => {
-    setPreferences(newPrefs);
-  };
+  useEffect(() => {
+    fetchDossier();
+  }, [fetchDossier]);
 
-  const removeFromWatchlist = async (id: number) => {
-    setWatchlist(prev => prev.filter(item => item.id !== id));
-  };
-
-  return {
-    profile,
-    watchlist,
-    preferences,
-    loading,
-    updatePreferences,
-    removeFromWatchlist
+  return { 
+    profile, 
+    watchlist, 
+    preferences, 
+    loading, 
+    updatePreferences: async (newPrefs: Partial<HunterPreferences>) => {
+        // Optimistic Update
+        setPreferences(p => ({...p, ...newPrefs}));
+        const { data: { user } } = await supabase.auth.getUser();
+        if(user) await supabase.from('profiles').update({preferences: {...preferences, ...newPrefs}}).eq('id', user.id);
+    }, 
+    removeFromWatchlist: async (id: number) => {
+        setWatchlist(prev => prev.filter(item => item.id !== id));
+        await supabase.from('saved_properties').delete().eq('id', id);
+    }
   };
 }
