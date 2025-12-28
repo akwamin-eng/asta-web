@@ -10,7 +10,7 @@ export interface Property {
   long: number;
   location_name: string;
   location_accuracy: 'high' | 'low';
-  vibe_features: string | string[]; // Can be JSON string or array
+  vibe_features: string | string[];
   description: string;
   type: 'sale' | 'rent';
   cover_image_url?: string;
@@ -30,7 +30,7 @@ export function useLiveListings() {
   useEffect(() => {
     fetchListings();
 
-    // Subscribe to realtime changes (New scraped assets appear instantly)
+    // Subscribe to realtime changes
     const subscription = supabase
       .channel('public:properties')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'properties' }, () => {
@@ -63,22 +63,23 @@ export function useLiveListings() {
           cover_image_url,
           property_images(url),
           details,
-          owner_id
+          owner_id,
+          source
         `)
-        .eq('status', 'active');
+        .eq('status', 'active')
+        // FILTER: Hide Intelligence Seeds from the frontend Map
+        .neq('source', 'internal_migration')
+        .neq('source', 'scraper_import');
 
       if (error) throw error;
 
       // Normalize data structure
       const normalized = (data || []).map((p: any) => ({
         ...p,
-        // Ensure features are always an array for the search filter
         vibe_features: typeof p.vibe_features === 'string' 
           ? p.vibe_features 
           : JSON.stringify(p.vibe_features || []),
-        // Flatten images array
         images: p.property_images?.map((i: any) => i.url) || [],
-        // Ensure details object exists
         details: p.details || { bedrooms: 1, bathrooms: 1 }
       }));
 
