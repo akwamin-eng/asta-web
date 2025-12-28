@@ -11,7 +11,7 @@ import Map, {
   NavigationControl,
   FullscreenControl,
   useControl,
-  Marker, // NEW: For the draggable pin
+  Marker,
 } from "react-map-gl";
 import MapboxDraw from "@mapbox/mapbox-gl-draw";
 import "@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css";
@@ -27,55 +27,30 @@ import {
   Search,
   Loader2,
   Brain,
-  DollarSign,
   X,
   Bug,
   MessageSquare,
   Send,
-  ChevronUp,
-  ChevronDown,
   LogIn,
   LayoutDashboard,
-  User,
-  Plus, // NEW: List Button Icon
-  Check, // NEW: Confirm Pin Icon
-  BellRing // NEW: Hunter Icon
+  Plus,
+  Check,
+  BellRing,
+  Crosshair, // NEW: Locate Icon
+  Shield, // NEW: Trust Radar Icon
 } from "lucide-react";
 import { useLiveListings } from "../hooks/useLiveListings";
 import { useAuth } from "../hooks/useAuth";
-import { useGooglePlaces } from "../hooks/useGooglePlaces"; // NEW: Address Intelligence
+import { useGooglePlaces } from "../hooks/useGooglePlaces";
+import { useGeolocation } from "../hooks/useGeolocation";
 import { AnimatePresence, motion } from "framer-motion";
 import ListingCard from "./ListingCard";
 import AuthModal from "./AuthModal";
 import PropertyInspector from "./PropertyInspector";
 import UnifiedCommandCenter from "./dossier/UnifiedCommandCenter";
 import FieldReportModal from "./dossier/FieldReportModal";
-import SubmitIntelModal from "./dossier/SubmitIntelModal"; 
+import SubmitIntelModal from "./dossier/SubmitIntelModal";
 import type { FeatureCollection } from "geojson";
-
-// --- PROPRIETARY DATA: THE ASTA ATLAS (V2.1) ---
-const ASTA_ATLAS: Record<string, { lat: number; long: number; label: string }> =
-  {
-    ada: { lat: 5.7836, long: 0.6366, label: "Ada Foah" },
-    "ada foah": { lat: 5.7836, long: 0.6366, label: "Ada Foah" },
-    "new ningo": { lat: 5.7482, long: 0.1663, label: "New Ningo" },
-    ningo: { lat: 5.7482, long: 0.1663, label: "New Ningo" },
-    prampram: { lat: 5.7119, long: 0.1082, label: "Prampram" },
-    "shai hills": { lat: 5.908, long: 0.0556, label: "Shai Hills" },
-    aburi: { lat: 5.8458, long: -0.1764, label: "Aburi" },
-    akosombo: { lat: 6.2951, long: 0.0245, label: "Akosombo" },
-    dodowa: { lat: 5.8817, long: 0.0967, label: "Dodowa" },
-    oyibi: { lat: 5.7891, long: -0.1265, label: "Oyibi" },
-    amasaman: { lat: 5.7042, long: -0.3019, label: "Amasaman" },
-    "airport hills": { lat: 5.6198, long: -0.1363, label: "Airport Hills" },
-    "east legon hills": {
-      lat: 5.7333,
-      long: -0.1167,
-      label: "East Legon Hills",
-    },
-    cantonments: { lat: 5.5833, long: -0.1667, label: "Cantonments" },
-    fadama: { lat: 5.5928, long: -0.2389, label: "Fadama" },
-  };
 
 // --- STYLES ---
 const boundaryLayer: any = {
@@ -221,6 +196,7 @@ interface Property {
   description?: string;
   type: "sale" | "rent";
   image_url?: string;
+  location_accuracy?: string; // Added for Trust Radar
 }
 interface Suggestion {
   type: "location" | "feature";
@@ -234,25 +210,39 @@ const INITIAL_VIEW_STATE = { longitude: -0.187, latitude: 5.6037, zoom: 11 };
 export default function AstaMap() {
   const { listings } = useLiveListings();
   const { user } = useAuth();
-  
-  // NEW: Google Maps Logic Integration
-  const { reverseGeocode, searchPlace, loading: googleLoading } = useGooglePlaces();
+  const {
+    reverseGeocode,
+    searchPlace,
+    loading: googleLoading,
+  } = useGooglePlaces();
+  const {
+    location: gpsLocation,
+    getCurrentLocation,
+    loading: gpsLoading,
+  } = useGeolocation();
 
   const [isAuthModalOpen, setAuthModalOpen] = useState(false);
   const [isProfileOpen, setProfileOpen] = useState(false);
+  const [dossierSection, setDossierSection] = useState<"dashboard" | "hunter">(
+    "dashboard"
+  );
+
   const [selectedListing, setSelectedListing] = useState<Property | null>(null);
 
-  // Field Report Modal State
   const [verifyingProp, setVerifyingProp] = useState<{
     id: string;
     title: string;
   } | null>(null);
 
-  // NEW: Draft Location (The Draggable Pin)
-  const [draftLocation, setDraftLocation] = useState<{lat: number, long: number} | null>(null);
-
-  // Submit Intel (Lazy Listing) State
-  const [submitLocation, setSubmitLocation] = useState<{ lat: number; long: number; name?: string } | null>(null);
+  const [draftLocation, setDraftLocation] = useState<{
+    lat: number;
+    long: number;
+  } | null>(null);
+  const [submitLocation, setSubmitLocation] = useState<{
+    lat: number;
+    long: number;
+    name?: string;
+  } | null>(null);
 
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const [isMobileExpanded, setIsMobileExpanded] = useState(false);
@@ -268,6 +258,9 @@ export default function AstaMap() {
   const [mapStyle, setMapStyle] = useState("mapbox://styles/mapbox/dark-v11");
   const [showHeatmap, setShowHeatmap] = useState(false);
 
+  // NEW: Trust Radar State
+  const [showTrustRadar, setShowTrustRadar] = useState(false);
+
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackType, setFeedbackType] = useState<
     "location" | "bug" | "feature"
@@ -275,13 +268,11 @@ export default function AstaMap() {
   const [feedbackText, setFeedbackText] = useState("");
 
   const [searchBoundary, setSearchBoundary] = useState<any>(null);
-  
-  // UPDATED: Empty state now tracks the 'reason' (e.g. 'no_listings')
   const [showEmptyState, setShowEmptyState] = useState<{
     location: string;
-    type: "gps" | "area" | "atlas" | "hunter"; // Added 'hunter'
+    type: "gps" | "area" | "atlas" | "hunter";
   } | null>(null);
-  
+
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -297,6 +288,17 @@ export default function AstaMap() {
       .catch((err) => console.error("Engine Offline"));
   }, []);
 
+  // GPS Effect: Fly to user when location updates
+  useEffect(() => {
+    if (gpsLocation && mapRef.current) {
+      mapRef.current.flyTo({
+        center: [gpsLocation.lng, gpsLocation.lat],
+        zoom: 15,
+        duration: 2000,
+      });
+    }
+  }, [gpsLocation]);
+
   const handleReset = () => {
     setSearchQuery("");
     setSuggestions([]);
@@ -306,9 +308,10 @@ export default function AstaMap() {
     setDrawPolygon(null);
     setSelectedListing(null);
     setShowHeatmap(false);
+    setShowTrustRadar(false); // Reset Trust Radar
     setSearchBoundary(null);
     setShowEmptyState(null);
-    setDraftLocation(null); // Clear any active pins
+    setDraftLocation(null);
     mapRef.current?.flyTo({
       center: [INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude],
       zoom: INITIAL_VIEW_STATE.zoom,
@@ -320,34 +323,25 @@ export default function AstaMap() {
     handleReset();
   };
 
-  // NEW: Handler for the + Button
   const handleManualListing = () => {
     if (!user) {
       setAuthModalOpen(true);
       return;
     }
-    // Get center of map
     const center = mapRef.current?.getCenter();
     if (center) {
       setDraftLocation({ lat: center.lat, long: center.lng });
     }
   };
 
-  // NEW: Confirm the Draggable Pin
   const confirmLocation = async () => {
-    if(!draftLocation) return;
-    
-    // 1. Get Address from Google
+    if (!draftLocation) return;
     const address = await reverseGeocode(draftLocation.lat, draftLocation.long);
-    
-    // 2. Set Final Submit Location (Triggers Modal)
     setSubmitLocation({
       lat: draftLocation.lat,
       long: draftLocation.long,
-      name: address || "Unknown Location"
+      name: address || "Unknown Location",
     });
-    
-    // 3. Clear Draft
     setDraftLocation(null);
   };
 
@@ -367,82 +361,98 @@ export default function AstaMap() {
     console.log("Submitting Feedback:", payload);
     setFeedbackText("");
     setShowFeedback(false);
-    alert("Feedback received. Our cartographers are on it.");
+    alert("Feedback received.");
   };
 
-  // --- NEW: GOOGLE-POWERED SEARCH LOGIC ---
   const executeSearch = async (query: string) => {
     const q = query.trim();
     if (!q) return;
-    
+
     setSearchQuery(q);
     setShowSuggestions(false);
     setIsSearching(true);
     setShowEmptyState(null);
     setSearchBoundary(null);
 
-    // 1. IS IT A VIBE TAG? (e.g. "Pool", "Gym")
-    const allFeatures = Array.from(new Set(listings.flatMap(l => l.vibe_features.replace(/[\[\]"']/g, "").toLowerCase().split(","))));
-    if (allFeatures.some(f => f.includes(q.toLowerCase()))) {
-       // Filter by feature locally
-       const matches = listings.filter(l => l.vibe_features.toLowerCase().includes(q.toLowerCase()));
-       if(matches.length > 0) {
-          // Fit bounds to these matches
-          const points = turf.featureCollection(matches.map(m => turf.point([m.long, m.lat])));
-          const bbox = turf.bbox(points);
-          mapRef.current?.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 100, duration: 2000, maxZoom: 14 });
-       } else {
-          alert("No properties with that feature.");
-       }
-       setIsSearching(false);
-       return;
+    const allFeatures = Array.from(
+      new Set(
+        listings.flatMap((l) =>
+          l.vibe_features
+            .replace(/[\[\]"']/g, "")
+            .toLowerCase()
+            .split(",")
+        )
+      )
+    );
+    if (allFeatures.some((f) => f.includes(q.toLowerCase()))) {
+      const matches = listings.filter((l) =>
+        l.vibe_features.toLowerCase().includes(q.toLowerCase())
+      );
+      if (matches.length > 0) {
+        const points = turf.featureCollection(
+          matches.map((m) => turf.point([m.long, m.lat]))
+        );
+        const bbox = turf.bbox(points);
+        mapRef.current?.fitBounds(
+          [
+            [bbox[0], bbox[1]],
+            [bbox[2], bbox[3]],
+          ],
+          { padding: 100, duration: 2000, maxZoom: 14 }
+        );
+      } else {
+        alert("No properties with that feature.");
+      }
+      setIsSearching(false);
+      return;
     }
 
-    // 2. GOOGLE PLACES SEARCH
     const place = await searchPlace(q);
-    
     if (place) {
-       // A. FLY TO LOCATION
-       if (place.viewport) {
-          const { northeast, southwest } = place.viewport;
-          mapRef.current?.fitBounds(
-             [[southwest.lng, southwest.lat], [northeast.lng, northeast.lat]],
-             { padding: 100, duration: 2500 }
-          );
-          
-          // Draw the Google Viewport as a Boundary
-          const polygon = turf.bboxPolygon([southwest.lng, southwest.lat, northeast.lng, northeast.lat]);
-          setSearchBoundary({
-             type: "FeatureCollection",
-             features: [polygon]
-          });
+      if (place.viewport) {
+        const { northeast, southwest } = place.viewport;
+        mapRef.current?.fitBounds(
+          [
+            [southwest.lng, southwest.lat],
+            [northeast.lng, northeast.lat],
+          ],
+          { padding: 100, duration: 2500 }
+        );
 
-          // B. CHECK FOR LISTINGS IN THIS AREA
-          // Simple client-side check: are any listings inside this bbox?
-          const hasListings = listings.some(l => 
-             l.lat >= southwest.lat && l.lat <= northeast.lat &&
-             l.long >= southwest.lng && l.long <= northeast.lng
-          );
+        const polygon = turf.bboxPolygon([
+          southwest.lng,
+          southwest.lat,
+          northeast.lng,
+          northeast.lat,
+        ]);
+        setSearchBoundary({
+          type: "FeatureCollection",
+          features: [polygon],
+        });
 
-          if (!hasListings) {
-             // C. TRIGGER HUNTER CTA
-             setTimeout(() => {
-                setShowEmptyState({ location: place.name, type: "hunter" });
-             }, 1500); // Slight delay for dramatic effect
-          }
+        const hasListings = listings.some(
+          (l) =>
+            l.lat >= southwest.lat &&
+            l.lat <= northeast.lat &&
+            l.long >= southwest.lng &&
+            l.long <= northeast.lng
+        );
 
-       } else {
-          // Fallback if no viewport (point only)
-          mapRef.current?.flyTo({
-             center: [place.location.lng, place.location.lat],
-             zoom: 14,
-             duration: 2500
-          });
-       }
+        if (!hasListings) {
+          setTimeout(() => {
+            setShowEmptyState({ location: place.name, type: "hunter" });
+          }, 1500);
+        }
+      } else {
+        mapRef.current?.flyTo({
+          center: [place.location.lng, place.location.lat],
+          zoom: 14,
+          duration: 2500,
+        });
+      }
     } else {
-       alert("Asta Intelligence could not locate " + q);
+      alert("Asta Intelligence could not locate " + q);
     }
-    
     setIsSearching(false);
   };
 
@@ -454,7 +464,6 @@ export default function AstaMap() {
       setShowSuggestions(false);
       return;
     }
-    // Simple local suggestions for now (could upgrade to Google Autocomplete later)
     const lower = val.toLowerCase();
     const locs = Array.from(new Set(listings.map((l) => l.location_name)))
       .filter((l) => l.toLowerCase().includes(lower))
@@ -479,24 +488,29 @@ export default function AstaMap() {
     }
   };
 
+  // --- FILTER LOGIC (UPDATED WITH TRUST RADAR) ---
   const filteredListings = useMemo(() => {
     return listings.filter((l) => {
       if (!l.price || l.lat === 0) return false;
 
       const matchesType = filterType === "all" || l.type === filterType;
-      const query = searchQuery.toLowerCase();
-      // Only filter by text if NOT in "Area Search" mode (to avoid hiding pins when just looking at a region)
-      // But for now, we keep it simple.
       const price = l.price;
       const min = minPrice ? parseFloat(minPrice) : 0;
       const max = maxPrice ? parseFloat(maxPrice) : Infinity;
       const matchesPrice = price >= min && price <= max;
+
+      // Trust Radar Logic: Only show high accuracy listings if enabled
+      let matchesTrust = true;
+      if (showTrustRadar) {
+        matchesTrust = l.location_accuracy === "high";
+      }
+
       let matchesGeo = true;
       if (drawPolygon) {
         const pt = turf.point([l.long, l.lat]);
         matchesGeo = turf.booleanPointInPolygon(pt, drawPolygon);
       }
-      return matchesType && matchesGeo && matchesPrice;
+      return matchesType && matchesGeo && matchesPrice && matchesTrust;
     });
   }, [
     listings,
@@ -504,6 +518,7 @@ export default function AstaMap() {
     drawPolygon,
     minPrice,
     maxPrice,
+    showTrustRadar, // Added dependency
   ]);
 
   const geojsonData: FeatureCollection = useMemo(() => {
@@ -578,14 +593,13 @@ export default function AstaMap() {
         mapboxAccessToken={MAPBOX_TOKEN}
         interactiveLayerIds={["clusters", "unclustered-point", "price-label"]}
         onClick={onClickMap}
-        // Right Click now triggers Draft Pin instead of modal
         onContextMenu={(e) => {
-           e.preventDefault();
-           if (user) {
-             setDraftLocation({ lat: e.lngLat.lat, long: e.lngLat.lng });
-           } else {
-             setAuthModalOpen(true);
-           }
+          e.preventDefault();
+          if (user) {
+            setDraftLocation({ lat: e.lngLat.lat, long: e.lngLat.lng });
+          } else {
+            setAuthModalOpen(true);
+          }
         }}
       >
         {searchBoundary && (
@@ -609,35 +623,42 @@ export default function AstaMap() {
           <Layer {...unclusteredPointLayer} />
           <Layer {...priceLabelLayer} />
         </Source>
-        
-        {/* NEW: DRAGGABLE MARKER FOR DRAFT LOCATION */}
+
+        {/* DRAGGABLE MARKER */}
         {draftLocation && (
           <Marker
-             longitude={draftLocation.long}
-             latitude={draftLocation.lat}
-             draggable={true}
-             onDragEnd={(e) => setDraftLocation({ long: e.lngLat.lng, lat: e.lngLat.lat })}
-             anchor="bottom"
+            longitude={draftLocation.long}
+            latitude={draftLocation.lat}
+            draggable={true}
+            onDragEnd={(e) =>
+              setDraftLocation({ long: e.lngLat.lng, lat: e.lngLat.lat })
+            }
+            anchor="bottom"
           >
-             <div className="flex flex-col items-center gap-1 group cursor-grab active:cursor-grabbing">
-               {/* Tooltip Action */}
-               <div className="bg-black/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/20 text-white shadow-xl mb-1 flex items-center gap-2">
-                 <span className="text-[10px] font-bold">Drag to exact spot</span>
-                 <button 
-                   onClick={(e) => {
-                      e.stopPropagation();
-                      confirmLocation();
-                   }}
-                   className="bg-emerald-600 hover:bg-emerald-500 text-white rounded p-1 transition-colors"
-                 >
-                   {googleLoading ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                 </button>
-               </div>
-               <div className="text-emerald-500 drop-shadow-lg filter hover:scale-110 transition-transform">
-                 <MapPin size={40} fill="currentColor" strokeWidth={1} />
-               </div>
-               <div className="w-2 h-2 rounded-full bg-emerald-500/50 blur-[2px]" />
-             </div>
+            <div className="flex flex-col items-center gap-1 group cursor-grab active:cursor-grabbing">
+              <div className="bg-black/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/20 text-white shadow-xl mb-1 flex items-center gap-2">
+                <span className="text-[10px] font-bold">
+                  Drag to exact spot
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    confirmLocation();
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white rounded p-1 transition-colors"
+                >
+                  {googleLoading ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <Check size={12} />
+                  )}
+                </button>
+              </div>
+              <div className="text-emerald-500 drop-shadow-lg filter hover:scale-110 transition-transform">
+                <MapPin size={40} fill="currentColor" strokeWidth={1} />
+              </div>
+              <div className="w-2 h-2 rounded-full bg-emerald-500/50 blur-[2px]" />
+            </div>
           </Marker>
         )}
 
@@ -658,14 +679,31 @@ export default function AstaMap() {
           onDelete={onDrawDelete}
         />
 
+        {/* --- MAP CONTROL STACK (Consolidated & Simplified) --- */}
         <div className="absolute top-4 right-4 md:bottom-32 md:top-auto md:right-[10px] flex flex-col gap-2 z-10">
+          {/* LOCATE ME */}
+          <button
+            onClick={getCurrentLocation}
+            className="w-[29px] h-[29px] bg-white rounded-md shadow flex items-center justify-center hover:bg-emerald-50 text-emerald-600 border border-gray-300 transition-colors"
+            title="Locate Me (GPS)"
+          >
+            {gpsLoading ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Crosshair size={16} />
+            )}
+          </button>
+
+          {/* RESET */}
           <button
             onClick={handleReset}
             className="w-[29px] h-[29px] bg-white rounded-md shadow flex items-center justify-center hover:bg-red-50 text-red-600 border border-gray-300 transition-colors"
-            title="Full System Reset"
+            title="Reset Map View"
           >
             <RotateCcw size={16} />
           </button>
+
+          {/* THEME TOGGLE */}
           <button
             onClick={() =>
               setMapStyle((s) =>
@@ -675,30 +713,53 @@ export default function AstaMap() {
               )
             }
             className="w-[29px] h-[29px] bg-white rounded-md shadow flex items-center justify-center hover:bg-gray-100 text-black border border-gray-300"
-            title="Theme"
+            title="Toggle Map Theme"
           >
             {mapStyle.includes("dark") ? <Sun size={16} /> : <Moon size={16} />}
           </button>
+
+          {/* HEATMAP TOGGLE */}
           <button
-            onClick={() => setShowHeatmap(!showHeatmap)}
+            onClick={() => {
+              setShowHeatmap(!showHeatmap);
+              setShowTrustRadar(false); // Disable trust if heatmap on
+            }}
             className={`w-[29px] h-[29px] rounded-md shadow flex items-center justify-center transition-all border ${
               showHeatmap
                 ? "bg-emerald-500 text-white border-emerald-600"
                 : "bg-white text-black border-gray-300 hover:bg-gray-100"
             }`}
-            title="Heatmap"
+            title="Toggle Price Heatmap"
           >
             <Layers size={16} />
           </button>
+
+          {/* NEW: TRUST RADAR TOGGLE */}
+          <button
+            onClick={() => {
+              setShowTrustRadar(!showTrustRadar);
+              setShowHeatmap(false); // Disable heatmap if trust on
+            }}
+            className={`w-[29px] h-[29px] rounded-md shadow flex items-center justify-center transition-all border ${
+              showTrustRadar
+                ? "bg-purple-600 text-white border-purple-700"
+                : "bg-white text-black border-gray-300 hover:bg-gray-100"
+            }`}
+            title="Toggle Trust Radar (Verified Assets Only)"
+          >
+            <Shield size={16} />
+          </button>
+
+          {/* BUG REPORT */}
           <button
             onClick={() => setShowFeedback(true)}
             className="w-[29px] h-[29px] bg-white rounded-md shadow flex items-center justify-center hover:bg-orange-50 text-orange-500 border border-gray-300 transition-colors"
-            title="Report Issue"
+            title="Report Issue / Feedback"
           >
             <Bug size={16} />
           </button>
-          
-          {/* NEW: DEDICATED LIST BUTTON */}
+
+          {/* LIST NEW */}
           <button
             onClick={handleManualListing}
             className="w-[29px] h-[29px] bg-emerald-600 rounded-md shadow flex items-center justify-center hover:bg-emerald-500 text-white border border-emerald-500 transition-colors"
@@ -723,6 +784,7 @@ export default function AstaMap() {
              inset-x-0 bottom-0 h-[80vh] rounded-t-xl border-t border-white/20 md:rounded-none md:border-t-0
           `}
         >
+          {/* ... SIDEBAR CONTENT (UNCHANGED) ... */}
           <div className="flex-1 flex flex-col bg-asta-deep/95 backdrop-blur-md h-full relative">
             <div
               className="md:hidden flex justify-center pt-2 pb-1 cursor-pointer"
@@ -744,27 +806,29 @@ export default function AstaMap() {
                   ASTA{" "}
                   <span className="text-asta-platinum font-light">LIVE</span>
                 </h1>
-                
                 <div className="ml-auto">
-                   {user ? (
-                      <button 
-                        onClick={() => setProfileOpen(true)}
-                        className="text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
-                      >
-                         <LayoutDashboard size={12} /> DOSSIER
-                      </button>
-                   ) : (
-                      <button
-                        onClick={() => setAuthModalOpen(true)}
-                        className="text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
-                      >
-                        <LogIn size={10} /> LOG IN
-                      </button>
-                   )}
+                  {user ? (
+                    <button
+                      onClick={() => {
+                        setDossierSection("dashboard");
+                        setProfileOpen(true);
+                      }}
+                      className="text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
+                    >
+                      <LayoutDashboard size={12} /> DOSSIER
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setAuthModalOpen(true)}
+                      className="text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
+                    >
+                      <LogIn size={10} /> LOG IN
+                    </button>
+                  )}
                 </div>
-
               </div>
 
+              {/* SEARCH & FILTERS (UNCHANGED) */}
               <div className="relative mb-3 z-50">
                 <div className="relative">
                   <input
@@ -977,18 +1041,24 @@ export default function AstaMap() {
             <PropertyInspector
               property={selectedListing}
               onClose={() => setSelectedListing(null)}
-              onVerify={() => setVerifyingProp({ id: selectedListing.id.toString(), title: selectedListing.title })}
+              onVerify={() =>
+                setVerifyingProp({
+                  id: selectedListing.id.toString(),
+                  title: selectedListing.title,
+                })
+              }
             />
           )}
         </AnimatePresence>
-        
         <AnimatePresence>
           {isProfileOpen && (
-            <UnifiedCommandCenter onClose={() => setProfileOpen(false)} />
+            <UnifiedCommandCenter
+              onClose={() => setProfileOpen(false)}
+              initialSection={dossierSection}
+            />
           )}
         </AnimatePresence>
 
-        {/* --- UPDATED: EMPTY STATE / HUNTER CTA --- */}
         <AnimatePresence>
           {showEmptyState && (
             <motion.div
@@ -998,32 +1068,47 @@ export default function AstaMap() {
               className="absolute top-8 left-1/2 -translate-x-1/2 z-40 bg-black/90 text-white px-6 py-4 rounded-lg shadow-2xl border border-white/20 flex flex-col items-center gap-2 backdrop-blur-md max-w-sm text-center"
             >
               <div className="flex items-center gap-2 text-emerald-400 font-bold mb-1">
-                {showEmptyState.type === "hunter" ? <BellRing size={20} className="animate-bounce" /> : <Brain size={20} />}
-                <span>{showEmptyState.type === "hunter" ? "ASTA HUNTER" : "ASTA INTELLIGENCE"}</span>
+                {showEmptyState.type === "hunter" ? (
+                  <BellRing size={20} className="animate-bounce" />
+                ) : (
+                  <Brain size={20} />
+                )}
+                <span>
+                  {showEmptyState.type === "hunter"
+                    ? "ASTA HUNTER"
+                    : "ASTA INTELLIGENCE"}
+                </span>
               </div>
-              
+
               <p className="text-lg font-bold text-white">
-                {showEmptyState.type === "hunter" 
-                   ? `No assets found in ${showEmptyState.location}` 
-                   : `Exploring ${showEmptyState.location}`}
+                {showEmptyState.type === "hunter"
+                  ? `No assets found in ${showEmptyState.location}`
+                  : `Exploring ${showEmptyState.location}`}
               </p>
-              
+
               {showEmptyState.type === "hunter" && (
-                 <p className="text-[10px] text-gray-400">
-                    Our network is dark in this sector. Configure a Hunter Alert to be notified when assets go live.
-                 </p>
+                <p className="text-[10px] text-gray-400">
+                  Our network is dark in this sector. Configure a Hunter Alert
+                  to be notified when assets go live.
+                </p>
               )}
 
               <div className="flex gap-2 mt-2 w-full">
-                <button 
+                <button
                   onClick={() => {
-                     setShowEmptyState(null);
-                     if(user) setProfileOpen(true); // Open Hunter Config
-                     else setAuthModalOpen(true);
+                    setShowEmptyState(null);
+                    if (user) {
+                      setDossierSection("hunter");
+                      setProfileOpen(true);
+                    } else {
+                      setAuthModalOpen(true);
+                    }
                   }}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold py-2 rounded transition-colors"
                 >
-                  {showEmptyState.type === "hunter" ? "Activate Hunter Alert" : "Join Waitlist"}
+                  {showEmptyState.type === "hunter"
+                    ? "Activate Hunter Alert"
+                    : "Join Waitlist"}
                 </button>
                 <button
                   onClick={() => setShowEmptyState(null)}
@@ -1038,26 +1123,26 @@ export default function AstaMap() {
 
         <AnimatePresence>
           {verifyingProp && (
-            <FieldReportModal 
+            <FieldReportModal
               propertyId={verifyingProp.id}
               propertyTitle={verifyingProp.title}
               onClose={() => setVerifyingProp(null)}
-              onSuccess={() => {
-                 // console.log("Report filed.");
-              }}
+              onSuccess={() => {}}
             />
           )}
         </AnimatePresence>
 
         <AnimatePresence>
           {submitLocation && (
-             <SubmitIntelModal 
-               location={submitLocation}
-               onClose={() => setSubmitLocation(null)}
-               onSuccess={() => {
-                  alert("Intelligence received. Asset is now active on the grid.");
-               }}
-             />
+            <SubmitIntelModal
+              location={submitLocation}
+              onClose={() => setSubmitLocation(null)}
+              onSuccess={() => {
+                alert(
+                  "Intelligence received. Asset is now active on the grid."
+                );
+              }}
+            />
           )}
         </AnimatePresence>
 

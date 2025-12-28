@@ -7,8 +7,10 @@ import HunterPreferences from "./HunterPreferences";
 import Dashboard from "../Dashboard";
 import SecureInbox from "./SecureInbox";
 import OnboardingModule from './OnboardingModule';
+import AssetClaimModal from "./AssetClaimModal"; // <--- FIXED IMPORT PATH
 import { useProfile } from "../../hooks/useProfile";
 import { useHunterIntel } from "../../hooks/useHunterIntel";
+import { useAssetDiscovery } from "../../hooks/useAssetDiscovery";
 
 interface UCCProps {
   onClose: () => void;
@@ -25,7 +27,12 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
     removeFromWatchlist,
   } = useProfile();
 
+  // --- INTELLIGENCE HOOKS ---
   const { messages, loading: intelLoading, markAsRead } = useHunterIntel(profile);
+  
+  // --- IDENTITY BRIDGE (ASSET DISCOVERY) ---
+  const { discoveredCount, claimAssets, isSyncing } = useAssetDiscovery(profile?.phone_number, profile?.id);
+  const [ignoreDiscovery, setIgnoreDiscovery] = useState(false);
 
   const unreadCount = messages.filter(m => m.status === 'unread').length;
   const hasUnread = unreadCount > 0;
@@ -48,6 +55,9 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
       </div>
     );
   }
+
+  // Tactical Haptic Effect Class
+  const widgetHoverEffect = "transition-transform duration-300 hover:scale-[1.01] hover:shadow-[0_4px_30px_rgba(16,185,129,0.1)]";
 
   return (
     <motion.div
@@ -82,6 +92,7 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
         }
       `}</style>
 
+      {/* --- MODALS & OVERLAYS --- */}
       <AnimatePresence>
         {showOnboarding && (
           <OnboardingModule 
@@ -90,6 +101,16 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
           />
         )}
       </AnimatePresence>
+
+      {/* ASSET CLAIM MODAL (IDENTITY BRIDGE) */}
+      {!ignoreDiscovery && discoveredCount > 0 && (
+        <AssetClaimModal 
+          count={discoveredCount} 
+          onClaim={claimAssets} 
+          onIgnore={() => setIgnoreDiscovery(true)}
+          isSyncing={isSyncing} 
+        />
+      )}
 
       {/* --- HEADER --- */}
       <header className="h-16 md:h-20 border-b border-white/10 flex items-center justify-between px-4 md:px-8 bg-black/60 shrink-0 z-50">
@@ -174,12 +195,12 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
           
           {/* TOP ROW: AGENT | DIRECTIVES | TARGETS */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
-            <div className="w-full">
+            <div className={`w-full ${widgetHoverEffect}`}>
               <IdentityModule profile={profile} />
             </div>
             
             <motion.div 
-               className="h-full rounded-2xl overflow-hidden"
+               className={`h-full rounded-2xl overflow-hidden ${widgetHoverEffect}`}
                animate={initialSection === 'hunter' ? {
                  boxShadow: ["0 0 0px rgba(16, 185, 129, 0)", "0 0 25px rgba(16, 185, 129, 0.4)", "0 0 0px rgba(16, 185, 129, 0)"],
                  borderColor: ["rgba(255,255,255,0.1)", "rgba(16, 185, 129, 1)", "rgba(255,255,255,0.1)"]
@@ -192,7 +213,7 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
               />
             </motion.div>
 
-            <div className="w-full h-[400px] md:h-auto">
+            <div className={`w-full h-[400px] md:h-auto ${widgetHoverEffect}`}>
               <SmartWatchlist
                 items={watchlist}
                 onRemove={removeFromWatchlist}
