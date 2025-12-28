@@ -5,30 +5,29 @@ import {
   MessageSquare,
   Share2,
   ShieldCheck,
-  Clock,
-  CheckCircle,
   ChevronDown,
   ArrowLeft,
-  AlertTriangle,
   Maximize2,
   ChevronLeft,
   ChevronRight,
+  AlertTriangle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import IntelligenceCard from "./modules/IntelligenceCard";
 import SaveButton from "./SaveButton";
+import TrustScorecard from "./intel/TrustScorecard"; 
+import MarketPulse from "./intel/MarketPulse"; // <--- NEW IMPORT
 
-// Updated interface to include onVerify
 interface PropertyInspectorProps {
   property: any;
   onClose: () => void;
-  onVerify?: () => void; // <--- NEW PROP
+  onVerify?: () => void;
 }
 
 export default function PropertyInspector({
   property,
   onClose,
-  onVerify, // <--- Destructured here
+  onVerify,
 }: PropertyInspectorProps) {
   // State for Currency Toggle
   const [currency, setCurrency] = useState<"GHS" | "USD">("GHS");
@@ -183,7 +182,7 @@ export default function PropertyInspector({
           animate={{ x: 0 }}
           exit={{ x: "100%" }}
           transition={{ type: "tween", duration: 0.3, ease: "easeInOut" }}
-          className="fixed top-0 right-0 h-full w-full md:w-[450px] bg-[#0A0A0A] border-l border-white/10 shadow-2xl z-50 overflow-y-auto"
+          className="fixed top-0 right-0 h-full w-full md:w-[450px] bg-[#0A0A0A] border-l border-white/10 shadow-2xl z-50 overflow-y-auto custom-scrollbar"
         >
           {/* IMAGE HEADER */}
           <div
@@ -268,7 +267,14 @@ export default function PropertyInspector({
           </div>
 
           {/* MAIN CONTENT */}
-          <div className="p-6 space-y-8">
+          <div className="p-6 space-y-6">
+            
+            {/* 1. DIASPORA TRUST SCORE CARD */}
+            <TrustScorecard property={data} owner={data.owner} />
+
+            {/* 2. MARKET PULSE (DYNAMIC INDEX) */}
+            <MarketPulse property={data} />
+
             <IntelligenceCard
               key={data.id}
               propertyId={data.id}
@@ -304,34 +310,7 @@ export default function PropertyInspector({
               </div>
             )}
 
-            <div className="bg-gradient-to-br from-emerald-900/10 to-transparent border border-emerald-500/20 rounded-xl p-5">
-              <h3 className="text-emerald-400 text-xs font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
-                <ShieldCheck size={14} /> Asta Intelligence
-              </h3>
-              <div className="space-y-2">
-                <div className="flex items-start gap-2">
-                  <CheckCircle
-                    size={14}
-                    className="text-emerald-500 mt-0.5 shrink-0"
-                  />
-                  <p className="text-xs text-gray-400">
-                    Price is{" "}
-                    <span className="text-white font-bold">within 5%</span> of
-                    market average for {data.location_name}.
-                  </p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <Clock
-                    size={14}
-                    className="text-emerald-500 mt-0.5 shrink-0"
-                  />
-                  <p className="text-xs text-gray-400">
-                    Listed 2 days ago. High demand expected.
-                  </p>
-                </div>
-              </div>
-            </div>
-
+            {/* ASTA ADVISOR (Legacy Logic) */}
             <div className="bg-orange-500/5 border border-orange-500/20 rounded-xl p-5">
               <h3 className="text-orange-400 text-xs font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
                 <AlertTriangle size={14} /> Asta Advisor
