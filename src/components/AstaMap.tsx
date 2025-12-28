@@ -11,6 +11,7 @@ import Map, {
   NavigationControl,
   FullscreenControl,
   useControl,
+  Marker, // NEW: For the draggable pin
 } from "react-map-gl";
 import MapboxDraw from "@mapbox/mapbox-gl-draw";
 import "@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css";
@@ -36,15 +37,20 @@ import {
   LogIn,
   LayoutDashboard,
   User,
+  Plus, // NEW: List Button Icon
+  Check, // NEW: Confirm Pin Icon
+  BellRing // NEW: Hunter Icon
 } from "lucide-react";
 import { useLiveListings } from "../hooks/useLiveListings";
 import { useAuth } from "../hooks/useAuth";
+import { useGooglePlaces } from "../hooks/useGooglePlaces"; // NEW: Address Intelligence
 import { AnimatePresence, motion } from "framer-motion";
 import ListingCard from "./ListingCard";
 import AuthModal from "./AuthModal";
 import PropertyInspector from "./PropertyInspector";
 import UnifiedCommandCenter from "./dossier/UnifiedCommandCenter";
-import FieldReportModal from "./dossier/FieldReportModal"; // NEW IMPORT
+import FieldReportModal from "./dossier/FieldReportModal";
+import SubmitIntelModal from "./dossier/SubmitIntelModal"; 
 import type { FeatureCollection } from "geojson";
 
 // --- PROPRIETARY DATA: THE ASTA ATLAS (V2.1) ---
@@ -228,16 +234,25 @@ const INITIAL_VIEW_STATE = { longitude: -0.187, latitude: 5.6037, zoom: 11 };
 export default function AstaMap() {
   const { listings } = useLiveListings();
   const { user } = useAuth();
+  
+  // NEW: Google Maps Logic Integration
+  const { reverseGeocode, searchPlace, loading: googleLoading } = useGooglePlaces();
 
   const [isAuthModalOpen, setAuthModalOpen] = useState(false);
   const [isProfileOpen, setProfileOpen] = useState(false);
   const [selectedListing, setSelectedListing] = useState<Property | null>(null);
 
-  // NEW: State for the Field Report Modal
+  // Field Report Modal State
   const [verifyingProp, setVerifyingProp] = useState<{
     id: string;
     title: string;
   } | null>(null);
+
+  // NEW: Draft Location (The Draggable Pin)
+  const [draftLocation, setDraftLocation] = useState<{lat: number, long: number} | null>(null);
+
+  // Submit Intel (Lazy Listing) State
+  const [submitLocation, setSubmitLocation] = useState<{ lat: number; long: number; name?: string } | null>(null);
 
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const [isMobileExpanded, setIsMobileExpanded] = useState(false);
@@ -260,11 +275,13 @@ export default function AstaMap() {
   const [feedbackText, setFeedbackText] = useState("");
 
   const [searchBoundary, setSearchBoundary] = useState<any>(null);
+  
+  // UPDATED: Empty state now tracks the 'reason' (e.g. 'no_listings')
   const [showEmptyState, setShowEmptyState] = useState<{
     location: string;
-    type: "gps" | "area" | "atlas";
+    type: "gps" | "area" | "atlas" | "hunter"; // Added 'hunter'
   } | null>(null);
-
+  
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -291,6 +308,7 @@ export default function AstaMap() {
     setShowHeatmap(false);
     setSearchBoundary(null);
     setShowEmptyState(null);
+    setDraftLocation(null); // Clear any active pins
     mapRef.current?.flyTo({
       center: [INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude],
       zoom: INITIAL_VIEW_STATE.zoom,
@@ -300,6 +318,37 @@ export default function AstaMap() {
 
   const handleDashboardReset = () => {
     handleReset();
+  };
+
+  // NEW: Handler for the + Button
+  const handleManualListing = () => {
+    if (!user) {
+      setAuthModalOpen(true);
+      return;
+    }
+    // Get center of map
+    const center = mapRef.current?.getCenter();
+    if (center) {
+      setDraftLocation({ lat: center.lat, long: center.lng });
+    }
+  };
+
+  // NEW: Confirm the Draggable Pin
+  const confirmLocation = async () => {
+    if(!draftLocation) return;
+    
+    // 1. Get Address from Google
+    const address = await reverseGeocode(draftLocation.lat, draftLocation.long);
+    
+    // 2. Set Final Submit Location (Triggers Modal)
+    setSubmitLocation({
+      lat: draftLocation.lat,
+      long: draftLocation.long,
+      name: address || "Unknown Location"
+    });
+    
+    // 3. Clear Draft
+    setDraftLocation(null);
   };
 
   const submitFeedback = async () => {
@@ -321,173 +370,80 @@ export default function AstaMap() {
     alert("Feedback received. Our cartographers are on it.");
   };
 
+  // --- NEW: GOOGLE-POWERED SEARCH LOGIC ---
   const executeSearch = async (query: string) => {
-    const q = query.trim().toLowerCase();
+    const q = query.trim();
     if (!q) return;
-    setSearchQuery(query);
+    
+    setSearchQuery(q);
     setShowSuggestions(false);
     setIsSearching(true);
+    setShowEmptyState(null);
+    setSearchBoundary(null);
 
-    // 1. IS IT A FEATURE?
-    const allFeatures = Array.from(
-      new Set(
-        listings.flatMap((l) =>
-          l.vibe_features
-            .replace(/[\[\]"']/g, "")
-            .toLowerCase()
-            .split(",")
-        )
-      )
-    );
-    const isFeature = allFeatures.some((f) => f.includes(q) || q.includes(f));
-
-    if (isFeature) {
-      setSearchBoundary(null);
-      setShowEmptyState(null);
-      const matches = listings.filter((l) =>
-        l.vibe_features.toLowerCase().includes(q)
-      );
-      if (matches.length > 0) {
-        const points = turf.featureCollection(
-          matches.map((m) => turf.point([m.long, m.lat]))
-        );
-        const bbox = turf.bbox(points);
-        mapRef.current?.fitBounds(
-          [
-            [bbox[0], bbox[1]],
-            [bbox[2], bbox[3]],
-          ],
-          { padding: 100, duration: 2000, maxZoom: 14 }
-        );
-      } else alert(`No properties found with feature "${query}".`);
-      setIsSearching(false);
-      return;
+    // 1. IS IT A VIBE TAG? (e.g. "Pool", "Gym")
+    const allFeatures = Array.from(new Set(listings.flatMap(l => l.vibe_features.replace(/[\[\]"']/g, "").toLowerCase().split(","))));
+    if (allFeatures.some(f => f.includes(q.toLowerCase()))) {
+       // Filter by feature locally
+       const matches = listings.filter(l => l.vibe_features.toLowerCase().includes(q.toLowerCase()));
+       if(matches.length > 0) {
+          // Fit bounds to these matches
+          const points = turf.featureCollection(matches.map(m => turf.point([m.long, m.lat])));
+          const bbox = turf.bbox(points);
+          mapRef.current?.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 100, duration: 2000, maxZoom: 14 });
+       } else {
+          alert("No properties with that feature.");
+       }
+       setIsSearching(false);
+       return;
     }
 
-    // 2. CHECK ASTA ATLAS
-    if (ASTA_ATLAS[q]) {
-      const match = ASTA_ATLAS[q];
-      setTimeout(() => {
-        const geometry = turf.circle([match.long, match.lat], 2.0, {
-          steps: 20,
-          units: "kilometers",
-        }).geometry;
-        setSearchBoundary({
-          type: "FeatureCollection",
-          features: [{ type: "Feature", geometry }],
-        });
-        setShowEmptyState({ location: match.label, type: "atlas" });
-        mapRef.current?.flyTo({
-          center: [match.long, match.lat],
-          zoom: 12,
-          duration: 2500,
-        });
-        setIsSearching(false);
-      }, 600);
-      return;
-    }
-
-    // 3. GHANA POST
-    const ghanaPostRegex = /^[A-Z]{2}-\d{3,4}-\d{3,4}$/i;
-    if (ghanaPostRegex.test(q)) {
-      setTimeout(() => {
-        const fakeLat = 5.6037 + Math.random() * 0.01;
-        const fakeLong = -0.187 + Math.random() * 0.01;
-        setSearchBoundary(null);
-        setShowEmptyState({ location: q.toUpperCase(), type: "gps" });
-        mapRef.current?.flyTo({
-          center: [fakeLong, fakeLat],
-          zoom: 18,
-          duration: 2000,
-        });
-        setIsSearching(false);
-      }, 800);
-      return;
-    }
-
-    // 4. LISTING MATCH
-    const locationMatch = listings.find((l) =>
-      l.location_name.toLowerCase().includes(q)
-    );
-    if (locationMatch) {
-      mapRef.current?.flyTo({
-        center: [locationMatch.long, locationMatch.lat],
-        zoom: 14,
-        duration: 2000,
-      });
-      setIsSearching(false);
-      return;
-    }
-
-    // 5. MAPBOX
-    try {
-      const mapboxQuery = q.includes("ghana") ? q : `${q}, Ghana`;
-      const res = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
-          mapboxQuery
-        )}.json?country=gh&access_token=${MAPBOX_TOKEN}`
-      );
-      const data = await res.json();
-      if (data.features && data.features.length > 0) {
-        const validTypes = [
-          "neighborhood",
-          "locality",
-          "place",
-          "district",
-          "poi",
-          "address",
-        ];
-        const bestMatch = data.features.find((f: any) =>
-          f.place_type.some((t: string) => validTypes.includes(t))
-        );
-        const feature = bestMatch || data.features[0];
-        const [long, lat] = feature.center;
-        const isBroadArea = feature.place_type.some((t: string) =>
-          ["country", "region"].includes(t)
-        );
-        if (!isBroadArea) {
-          let geometry = feature.geometry;
-          if (feature.bbox) geometry = turf.bboxPolygon(feature.bbox).geometry;
-          else
-            geometry = turf.circle([long, lat], 2.0, {
-              steps: 20,
-              units: "kilometers",
-            }).geometry;
-          setSearchBoundary({
-            type: "FeatureCollection",
-            features: [{ type: "Feature", geometry }],
-          });
-        } else setSearchBoundary(null);
-
-        const hasListings = listings.some(
-          (l) =>
-            l.location_name.toLowerCase().includes(q) ||
-            l.title.toLowerCase().includes(q)
-        );
-        if (!hasListings)
-          setShowEmptyState({ location: feature.text, type: "area" });
-        else setShowEmptyState(null);
-
-        if (feature.bbox)
+    // 2. GOOGLE PLACES SEARCH
+    const place = await searchPlace(q);
+    
+    if (place) {
+       // A. FLY TO LOCATION
+       if (place.viewport) {
+          const { northeast, southwest } = place.viewport;
           mapRef.current?.fitBounds(
-            [
-              [feature.bbox[0], feature.bbox[1]],
-              [feature.bbox[2], feature.bbox[3]],
-            ],
-            { padding: 100, duration: 2500 }
+             [[southwest.lng, southwest.lat], [northeast.lng, northeast.lat]],
+             { padding: 100, duration: 2500 }
           );
-        else
-          mapRef.current?.flyTo({
-            center: [long, lat],
-            zoom: isBroadArea ? 9 : 12,
-            duration: 2500,
+          
+          // Draw the Google Viewport as a Boundary
+          const polygon = turf.bboxPolygon([southwest.lng, southwest.lat, northeast.lng, northeast.lat]);
+          setSearchBoundary({
+             type: "FeatureCollection",
+             features: [polygon]
           });
-      } else alert(`Asta Intelligence could not locate "${query}".`);
-    } catch (e) {
-      console.error("Geocoding failed", e);
-    } finally {
-      setIsSearching(false);
+
+          // B. CHECK FOR LISTINGS IN THIS AREA
+          // Simple client-side check: are any listings inside this bbox?
+          const hasListings = listings.some(l => 
+             l.lat >= southwest.lat && l.lat <= northeast.lat &&
+             l.long >= southwest.lng && l.long <= northeast.lng
+          );
+
+          if (!hasListings) {
+             // C. TRIGGER HUNTER CTA
+             setTimeout(() => {
+                setShowEmptyState({ location: place.name, type: "hunter" });
+             }, 1500); // Slight delay for dramatic effect
+          }
+
+       } else {
+          // Fallback if no viewport (point only)
+          mapRef.current?.flyTo({
+             center: [place.location.lng, place.location.lat],
+             zoom: 14,
+             duration: 2500
+          });
+       }
+    } else {
+       alert("Asta Intelligence could not locate " + q);
     }
+    
+    setIsSearching(false);
   };
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -498,28 +454,14 @@ export default function AstaMap() {
       setShowSuggestions(false);
       return;
     }
+    // Simple local suggestions for now (could upgrade to Google Autocomplete later)
     const lower = val.toLowerCase();
     const locs = Array.from(new Set(listings.map((l) => l.location_name)))
       .filter((l) => l.toLowerCase().includes(lower))
       .slice(0, 3)
       .map((l) => ({ type: "location", value: l } as Suggestion));
-    const atlasMatches = Object.values(ASTA_ATLAS)
-      .filter((entry) => entry.label.toLowerCase().includes(lower))
-      .map((entry) => ({ type: "location", value: entry.label } as Suggestion));
-    const tags = Array.from(
-      new Set(
-        listings.flatMap((l) =>
-          l.vibe_features.replace(/[\[\]"']/g, "").split(",")
-        )
-      )
-    )
-      .map((t) => t.trim())
-      .filter((t) => t.toLowerCase().includes(lower))
-      .slice(0, 3)
-      .map((t) => ({ type: "feature", value: t } as Suggestion));
-    const combined = [...locs, ...atlasMatches, ...tags].slice(0, 6);
-    setSuggestions(combined);
-    setShowSuggestions(combined.length > 0);
+    setSuggestions(locs);
+    setShowSuggestions(locs.length > 0);
   };
 
   const applyPricePreset = (label: string) => {
@@ -543,12 +485,8 @@ export default function AstaMap() {
 
       const matchesType = filterType === "all" || l.type === filterType;
       const query = searchQuery.toLowerCase();
-      const textToSearch = `${l.title} ${l.location_name} ${l.vibe_features} ${
-        l.description || ""
-      }`.toLowerCase();
-      let matchesSearch = true;
-      if (searchQuery.length > 2 && !showEmptyState)
-        matchesSearch = textToSearch.includes(query);
+      // Only filter by text if NOT in "Area Search" mode (to avoid hiding pins when just looking at a region)
+      // But for now, we keep it simple.
       const price = l.price;
       const min = minPrice ? parseFloat(minPrice) : 0;
       const max = maxPrice ? parseFloat(maxPrice) : Infinity;
@@ -558,16 +496,14 @@ export default function AstaMap() {
         const pt = turf.point([l.long, l.lat]);
         matchesGeo = turf.booleanPointInPolygon(pt, drawPolygon);
       }
-      return matchesType && matchesSearch && matchesGeo && matchesPrice;
+      return matchesType && matchesGeo && matchesPrice;
     });
   }, [
     listings,
     filterType,
-    searchQuery,
     drawPolygon,
     minPrice,
     maxPrice,
-    showEmptyState,
   ]);
 
   const geojsonData: FeatureCollection = useMemo(() => {
@@ -642,6 +578,15 @@ export default function AstaMap() {
         mapboxAccessToken={MAPBOX_TOKEN}
         interactiveLayerIds={["clusters", "unclustered-point", "price-label"]}
         onClick={onClickMap}
+        // Right Click now triggers Draft Pin instead of modal
+        onContextMenu={(e) => {
+           e.preventDefault();
+           if (user) {
+             setDraftLocation({ lat: e.lngLat.lat, long: e.lngLat.lng });
+           } else {
+             setAuthModalOpen(true);
+           }
+        }}
       >
         {searchBoundary && (
           <Source id="search-boundary" type="geojson" data={searchBoundary}>
@@ -664,6 +609,38 @@ export default function AstaMap() {
           <Layer {...unclusteredPointLayer} />
           <Layer {...priceLabelLayer} />
         </Source>
+        
+        {/* NEW: DRAGGABLE MARKER FOR DRAFT LOCATION */}
+        {draftLocation && (
+          <Marker
+             longitude={draftLocation.long}
+             latitude={draftLocation.lat}
+             draggable={true}
+             onDragEnd={(e) => setDraftLocation({ long: e.lngLat.lng, lat: e.lngLat.lat })}
+             anchor="bottom"
+          >
+             <div className="flex flex-col items-center gap-1 group cursor-grab active:cursor-grabbing">
+               {/* Tooltip Action */}
+               <div className="bg-black/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/20 text-white shadow-xl mb-1 flex items-center gap-2">
+                 <span className="text-[10px] font-bold">Drag to exact spot</span>
+                 <button 
+                   onClick={(e) => {
+                      e.stopPropagation();
+                      confirmLocation();
+                   }}
+                   className="bg-emerald-600 hover:bg-emerald-500 text-white rounded p-1 transition-colors"
+                 >
+                   {googleLoading ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                 </button>
+               </div>
+               <div className="text-emerald-500 drop-shadow-lg filter hover:scale-110 transition-transform">
+                 <MapPin size={40} fill="currentColor" strokeWidth={1} />
+               </div>
+               <div className="w-2 h-2 rounded-full bg-emerald-500/50 blur-[2px]" />
+             </div>
+          </Marker>
+        )}
+
         <NavigationControl
           position="bottom-right"
           className="!hidden md:!block"
@@ -720,6 +697,15 @@ export default function AstaMap() {
           >
             <Bug size={16} />
           </button>
+          
+          {/* NEW: DEDICATED LIST BUTTON */}
+          <button
+            onClick={handleManualListing}
+            className="w-[29px] h-[29px] bg-emerald-600 rounded-md shadow flex items-center justify-center hover:bg-emerald-500 text-white border border-emerald-500 transition-colors"
+            title="List New Property"
+          >
+            <Plus size={16} />
+          </button>
         </div>
 
         <motion.div
@@ -758,24 +744,25 @@ export default function AstaMap() {
                   ASTA{" "}
                   <span className="text-asta-platinum font-light">LIVE</span>
                 </h1>
-
+                
                 <div className="ml-auto">
-                  {user ? (
-                    <button
-                      onClick={() => setProfileOpen(true)}
-                      className="text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
-                    >
-                      <LayoutDashboard size={12} /> DOSSIER
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => setAuthModalOpen(true)}
-                      className="text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
-                    >
-                      <LogIn size={10} /> LOG IN
-                    </button>
-                  )}
+                   {user ? (
+                      <button 
+                        onClick={() => setProfileOpen(true)}
+                        className="text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
+                      >
+                         <LayoutDashboard size={12} /> DOSSIER
+                      </button>
+                   ) : (
+                      <button
+                        onClick={() => setAuthModalOpen(true)}
+                        className="text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
+                      >
+                        <LogIn size={10} /> LOG IN
+                      </button>
+                   )}
                 </div>
+
               </div>
 
               <div className="relative mb-3 z-50">
@@ -990,22 +977,18 @@ export default function AstaMap() {
             <PropertyInspector
               property={selectedListing}
               onClose={() => setSelectedListing(null)}
-              onVerify={() =>
-                setVerifyingProp({
-                  id: selectedListing.id.toString(),
-                  title: selectedListing.title,
-                })
-              }
+              onVerify={() => setVerifyingProp({ id: selectedListing.id.toString(), title: selectedListing.title })}
             />
           )}
         </AnimatePresence>
-
+        
         <AnimatePresence>
           {isProfileOpen && (
             <UnifiedCommandCenter onClose={() => setProfileOpen(false)} />
           )}
         </AnimatePresence>
 
+        {/* --- UPDATED: EMPTY STATE / HUNTER CTA --- */}
         <AnimatePresence>
           {showEmptyState && (
             <motion.div
@@ -1015,15 +998,32 @@ export default function AstaMap() {
               className="absolute top-8 left-1/2 -translate-x-1/2 z-40 bg-black/90 text-white px-6 py-4 rounded-lg shadow-2xl border border-white/20 flex flex-col items-center gap-2 backdrop-blur-md max-w-sm text-center"
             >
               <div className="flex items-center gap-2 text-emerald-400 font-bold mb-1">
-                <Brain size={20} />
-                <span>ASTA INTELLIGENCE</span>
+                {showEmptyState.type === "hunter" ? <BellRing size={20} className="animate-bounce" /> : <Brain size={20} />}
+                <span>{showEmptyState.type === "hunter" ? "ASTA HUNTER" : "ASTA INTELLIGENCE"}</span>
               </div>
+              
               <p className="text-lg font-bold text-white">
-                Exploring {showEmptyState.location}
+                {showEmptyState.type === "hunter" 
+                   ? `No assets found in ${showEmptyState.location}` 
+                   : `Exploring ${showEmptyState.location}`}
               </p>
+              
+              {showEmptyState.type === "hunter" && (
+                 <p className="text-[10px] text-gray-400">
+                    Our network is dark in this sector. Configure a Hunter Alert to be notified when assets go live.
+                 </p>
+              )}
+
               <div className="flex gap-2 mt-2 w-full">
-                <button className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold py-2 rounded transition-colors">
-                  Join Waitlist
+                <button 
+                  onClick={() => {
+                     setShowEmptyState(null);
+                     if(user) setProfileOpen(true); // Open Hunter Config
+                     else setAuthModalOpen(true);
+                  }}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold py-2 rounded transition-colors"
+                >
+                  {showEmptyState.type === "hunter" ? "Activate Hunter Alert" : "Join Waitlist"}
                 </button>
                 <button
                   onClick={() => setShowEmptyState(null)}
@@ -1036,18 +1036,28 @@ export default function AstaMap() {
           )}
         </AnimatePresence>
 
-        {/* NEW: Field Report Modal Overlay */}
         <AnimatePresence>
           {verifyingProp && (
-            <FieldReportModal
+            <FieldReportModal 
               propertyId={verifyingProp.id}
               propertyTitle={verifyingProp.title}
               onClose={() => setVerifyingProp(null)}
               onSuccess={() => {
-                // Optional: Trigger a system-wide refresh or toast
-                // console.log("Report filed, reputation updated.");
+                 // console.log("Report filed.");
               }}
             />
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {submitLocation && (
+             <SubmitIntelModal 
+               location={submitLocation}
+               onClose={() => setSubmitLocation(null)}
+               onSuccess={() => {
+                  alert("Intelligence received. Asset is now active on the grid.");
+               }}
+             />
           )}
         </AnimatePresence>
 
