@@ -2,14 +2,17 @@ import React from 'react';
 import { Building2, Users, CheckCircle, Wallet } from 'lucide-react';
 
 interface PlatformStatsProps {
-  totalAssets: number;
-  avgRent: number;
-  verifiedCount: number;
+  totalAssets?: number;
+  avgRent?: number;
+  verifiedCount?: number;
 }
 
-export default function PlatformStats({ totalAssets, avgRent, verifiedCount }: PlatformStatsProps) {
-  // We format the numbers nicely (e.g. 1,200 instead of 1200)
-  const format = (n: number) => n.toLocaleString();
+export default function PlatformStats({ totalAssets = 0, avgRent = 0, verifiedCount = 0 }: PlatformStatsProps) {
+  // 🛡️ Safe Format Function
+  const format = (n: number | undefined | null) => {
+    if (n === undefined || n === null || isNaN(n)) return "0";
+    return n.toLocaleString();
+  };
 
   const STATS = [
     { label: 'Total Assets Tracked', value: format(totalAssets), change: 'LIVE', icon: <Building2 size={16} className="text-blue-400" /> },

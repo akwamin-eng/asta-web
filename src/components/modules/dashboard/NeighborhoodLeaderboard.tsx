@@ -7,9 +7,9 @@ interface Neighborhood {
   avgPrice: number;
 }
 
-export default function NeighborhoodLeaderboard({ data }: { data: Neighborhood[] }) {
+export default function NeighborhoodLeaderboard({ data = [] }: { data?: Neighborhood[] }) {
   if (!data || data.length === 0) {
-    return <div className="text-gray-500 text-xs p-4">No neighborhood data available yet.</div>;
+    return <div className="text-gray-500 text-xs p-4 text-center">No neighborhood data available yet.</div>;
   }
 
   return (

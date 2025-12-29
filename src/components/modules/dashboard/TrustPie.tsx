@@ -2,16 +2,31 @@ import React from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface TrustPieProps {
-  data: Array<{ name: string; value: number; color: string }>;
+  data?: Array<{ name: string; value: number; color: string }>;
 }
 
-export default function TrustPie({ data }: TrustPieProps) {
+export default function TrustPie({ data = [] }: TrustPieProps) {
+  if (!data || data.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center text-[10px] text-gray-500">
+        No Trust Data
+      </div>
+    );
+  }
+
   return (
     <div className="h-full flex flex-col">
       <div className="flex-1 min-h-[120px]">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
-            <Pie data={data} innerRadius={40} outerRadius={60} paddingAngle={5} dataKey="value" stroke="none">
+            <Pie 
+              data={data} 
+              innerRadius={40} 
+              outerRadius={60} 
+              paddingAngle={5} 
+              dataKey="value" 
+              stroke="none"
+            >
               {data.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={entry.color} />
               ))}

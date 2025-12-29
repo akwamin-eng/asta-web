@@ -1,69 +1,76 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
-export interface MarketStat {
-  totalVolume: number;
-  totalValue: number;
-  avgPrice: number;
-  activeListings: number;
-  zoneStats: {
-    name: string;      // Mapped from zone_name
-    count: number;
-    avgPrice: number;  // Mapped from avg_price
-    volume: number;
-  }[];
-  typeSplit: {
-    sale: number;      // Mapped from sale_count
-    rent: number;      // Mapped from rent_count
-  };
-}
-
 export function useMarketStats() {
-  const [stats, setStats] = useState<MarketStat | null>(null);
+  const [stats, setStats] = useState({
+    avgPrice: 0,
+    activeListings: 0,
+    zoneStats: [] as any[],
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchLiveStats();
+    async function fetchStats() {
+      try {
+        // 1. Fetch RENTALS only for the Average Price
+        // We filter out extreme outliers (> 50k) that are likely mislabeled sales
+        const { data: rentData } = await supabase
+          .from('properties')
+          .select('price')
+          .eq('type', 'rent') 
+          .lt('price', 50000); 
+
+        // 2. Fetch ALL active listings for volume counts
+        const { data: allData } = await supabase
+          .from('properties')
+          .select('location_name, price, type')
+          .eq('status', 'active');
+
+        if (!allData || !rentData) return;
+
+        // --- MATH SECTION ---
+
+        // A. Calculate Average Rent (Reliable)
+        const totalRent = rentData.reduce((sum, item) => sum + item.price, 0);
+        const avgRent = rentData.length > 0 ? Math.round(totalRent / rentData.length) : 0;
+
+        // B. Calculate Zone Leaderboard
+        const zoneMap: Record<string, { count: number; total: number }> = {};
+        
+        allData.forEach(p => {
+          // Normalize location name (e.g. "East Legon, Accra" -> "East Legon")
+          const zone = p.location_name ? p.location_name.split(',')[0].trim() : 'Unknown';
+          
+          if (!zoneMap[zone]) zoneMap[zone] = { count: 0, total: 0 };
+          zoneMap[zone].count += 1;
+          zoneMap[zone].total += p.price;
+        });
+
+        // Convert to array and SORT DESCENDING by Count
+        const zoneStats = Object.entries(zoneMap)
+          .map(([name, data]) => ({
+            name,
+            count: data.count,
+            avgPrice: Math.round(data.total / data.count)
+          }))
+          .sort((a, b) => b.count - a.count) // High volume first
+          .slice(0, 5); // Top 5 only
+
+        setStats({
+          avgPrice: avgRent,
+          activeListings: allData.length,
+          zoneStats
+        });
+
+      } catch (err) {
+        console.error('Stats Error:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchStats();
   }, []);
 
-  async function fetchLiveStats() {
-    try {
-      // Query the optimized Database View
-      const { data, error } = await supabase
-        .from('analytics_market_pulse')
-        .select('*')
-        .single(); // We expect exactly one row containing all aggregates
-
-      if (error) throw error;
-      if (!data) return;
-
-      // Map DB snake_case to frontend camelCase
-      setStats({
-        totalVolume: data.total_active,
-        totalValue: data.total_value,
-        avgPrice: data.avg_price,
-        activeListings: data.total_active,
-        
-        // Ensure zone_stats is an array (handle null case if 0 properties)
-        zoneStats: (data.zone_stats || []).map((z: any) => ({
-          name: z.zone_name || 'Unknown',
-          count: z.count,
-          avgPrice: z.avg_price,
-          volume: z.volume
-        })),
-
-        typeSplit: {
-          sale: data.type_split?.sale_count || 0,
-          rent: data.type_split?.rent_count || 0
-        }
-      });
-
-    } catch (err) {
-      console.error("Market Pulse Error:", err);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return { stats, loading, refresh: fetchLiveStats };
+  return { stats, loading };
 }
