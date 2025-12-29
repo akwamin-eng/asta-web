@@ -6,8 +6,8 @@ import SmartWatchlist from "./SmartWatchlist";
 import HunterPreferences from "./HunterPreferences";
 import Dashboard from "../Dashboard";
 import SecureInbox from "./SecureInbox";
-import OnboardingModule from './OnboardingModule';
-import AssetClaimModal from "./AssetClaimModal"; // <--- FIXED IMPORT PATH
+import OnboardingModule from "./OnboardingModule";
+import AssetClaimModal from "./AssetClaimModal"; 
 import { useProfile } from "../../hooks/useProfile";
 import { useHunterIntel } from "../../hooks/useHunterIntel";
 import { useAssetDiscovery } from "../../hooks/useAssetDiscovery";
@@ -34,11 +34,41 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
   const { discoveredCount, claimAssets, isSyncing } = useAssetDiscovery(profile?.phone_number, profile?.id);
   const [ignoreDiscovery, setIgnoreDiscovery] = useState(false);
 
-  const unreadCount = messages.filter(m => m.status === 'unread').length;
-  const hasUnread = unreadCount > 0;
-
+  // --- UX STATE ---
   const [viewMode, setViewMode] = useState<"dashboard" | "comms">("dashboard");
   const [showOnboarding, setShowOnboarding] = useState(false);
+  
+  // FIX 1: Dashboard Sync Key
+  // Increments whenever data changes to force the Dashboard to re-fetch/re-render
+  const [dashboardVersion, setDashboardVersion] = useState(0);
+
+  // FIX 2: Optimistic Read State
+  // Tracks IDs read in this session to update UI instantly before DB confirms
+  const [localReadIds, setLocalReadIds] = useState<string[]>([]);
+
+  // Calculate unread count defensively, excluding locally read messages
+  const unreadCount = (messages || [])
+    .filter(m => m.status === 'unread' && !localReadIds.includes(m.id))
+    .length;
+  
+  const hasUnread = unreadCount > 0;
+
+  // --- HANDLERS WITH SYNC ---
+
+  const handleUpdatePreferences = async (newPrefs: any) => {
+    await updatePreferences(newPrefs);
+    setDashboardVersion(v => v + 1); // Trigger Dashboard Refresh
+  };
+
+  const handleClaimAssets = async () => {
+    await claimAssets();
+    setDashboardVersion(v => v + 1); // Trigger Dashboard Refresh
+  };
+
+  const handleMarkAsRead = async (id: string) => {
+    setLocalReadIds(prev => [...prev, id]); // Optimistic Update
+    await markAsRead(id);
+  };
 
   useEffect(() => {
     if (profile && !loading) {
@@ -106,14 +136,14 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
       {!ignoreDiscovery && discoveredCount > 0 && (
         <AssetClaimModal 
           count={discoveredCount} 
-          onClaim={claimAssets} 
+          onClaim={handleClaimAssets} // Use Wrapper
           onIgnore={() => setIgnoreDiscovery(true)}
           isSyncing={isSyncing} 
         />
       )}
 
       {/* --- HEADER --- */}
-      <header className="h-16 md:h-20 border-b border-white/10 flex items-center justify-between px-4 md:px-8 bg-black/60 shrink-0 z-50">
+      <header className="h-16 md:h-20 border-b border-white/10 flex items-center justify-between px-4 md:px-8 bg-black/60 shrink-0 z-50 backdrop-blur-md">
         <div className="flex items-center gap-3 md:gap-8 overflow-hidden">
           <div className="flex items-center gap-2 md:gap-4 shrink-0">
             <div className="relative">
@@ -160,7 +190,7 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
               >
                 <Mail size={12} /> <span className="hidden xs:inline">Comms</span>
                 {hasUnread && (
-                  <span className="absolute -top-1 -right-1 md:-top-1.5 md:-right-1.5 w-3 h-3 md:w-4 md:h-4 bg-red-500 text-white text-[7px] md:text-[9px] flex items-center justify-center rounded-full border border-black animate-bounce shadow-lg">
+                  <span className="absolute -top-1 -right-1 md:-top-1.5 md:-right-1.5 w-3 h-3 md:w-4 md:h-4 bg-red-500 text-white text-[7px] md:text-[9px] flex items-center justify-center rounded-full border border-black animate-pulse shadow-lg">
                     {unreadCount}
                   </span>
                 )}
@@ -209,7 +239,7 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
             >
               <HunterPreferences
                 preferences={preferences}
-                onUpdate={updatePreferences}
+                onUpdate={handleUpdatePreferences} // Use Wrapper
               />
             </motion.div>
 
@@ -242,14 +272,15 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
                     </div>
                   </div>
                   <div className="flex-1 w-full relative z-20">
-                     <Dashboard />
+                     {/* FIX 2: FORCE REMOUNT ON UPDATE */}
+                     <Dashboard key={dashboardVersion} />
                   </div>
                 </>
               ) : (
                 <SecureInbox 
-                  messages={messages} 
+                  messages={messages || []} 
                   loading={intelLoading} 
-                  onRead={markAsRead} 
+                  onRead={handleMarkAsRead} // Use Wrapper
                 />
               )}
             </div>
@@ -257,7 +288,7 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
         </div>
 
         {/* --- BACK TO MAP BUTTON (CENTER BOTTOM) --- */}
-        <div className="pb-20 md:pb-12 pt-4 md:pt-8 flex justify-center sticky bottom-0 pointer-events-none">
+        <div className="pb-20 md:pb-12 pt-4 md:pt-8 flex justify-center sticky bottom-0 pointer-events-none z-50">
           <button
             onClick={onClose}
             className="pointer-events-auto group flex items-center gap-2 md:gap-3 px-6 md:px-8 py-2.5 md:py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full font-black text-[10px] md:text-xs uppercase tracking-[0.1em] md:tracking-[0.2em] shadow-[0_10px_30px_rgba(16,185,129,0.3)] transition-all hover:-translate-y-1 active:translate-y-0 border border-emerald-400/50"

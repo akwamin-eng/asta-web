@@ -17,6 +17,7 @@ import MapboxDraw from "@mapbox/mapbox-gl-draw";
 import "@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css";
 import * as turf from "@turf/turf";
 import "mapbox-gl/dist/mapbox-gl.css";
+import { useSearchParams } from "react-router-dom"; // IMPORT FIX: Router Hook
 import {
   Sun,
   Moon,
@@ -41,7 +42,6 @@ import {
 import { useLiveListings } from "../hooks/useLiveListings";
 import { useAuth } from "../hooks/useAuth";
 import { useGooglePlaces } from "../hooks/useGooglePlaces";
-// IMPORT FIX: Added the autocomplete hook
 import { useGoogleAutocomplete } from "../hooks/useGoogleAutocomplete"; 
 import { useGeolocation } from "../hooks/useGeolocation";
 import { AnimatePresence, motion } from "framer-motion";
@@ -202,7 +202,7 @@ interface Property {
 interface Suggestion {
   type: "location" | "feature";
   value: string;
-  placeId?: string; // NEW: Robust Place ID
+  placeId?: string; 
 }
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
@@ -215,7 +215,7 @@ export default function AstaMap() {
   const {
     reverseGeocode,
     searchPlace,
-    getPlaceDetails, // NEW: Robust Details
+    getPlaceDetails, 
     loading: googleLoading,
   } = useGooglePlaces();
   const {
@@ -230,12 +230,28 @@ export default function AstaMap() {
     loading: autocompleteLoading 
   } = useGoogleAutocomplete();
 
-  const [isAuthModalOpen, setAuthModalOpen] = useState(false);
-  const [isProfileOpen, setProfileOpen] = useState(false);
-  const [dossierSection, setDossierSection] = useState<"dashboard" | "hunter">(
-    "dashboard"
-  );
+  // --- ROUTING STATE ---
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // Is the Dossier open? Check the URL.
+  const isProfileOpen = searchParams.get('mode') === 'dossier';
+  
+  // Which section? Check the URL or default to dashboard
+  const dossierSection = (searchParams.get('section') as "dashboard" | "hunter") || "dashboard";
 
+  // --- HELPER TO OPEN DOSSIER ---
+  const openDossier = (section: "dashboard" | "hunter") => {
+    // This updates the URL without reloading the page
+    setSearchParams({ mode: 'dossier', section });
+  };
+
+  // --- HELPER TO CLOSE DOSSIER ---
+  const closeDossier = () => {
+    // Remove the params to close the modal
+    setSearchParams({});
+  };
+
+  const [isAuthModalOpen, setAuthModalOpen] = useState(false);
   const [selectedListing, setSelectedListing] = useState<Property | null>(null);
 
   const [verifyingProp, setVerifyingProp] = useState<{
@@ -371,7 +387,7 @@ export default function AstaMap() {
     alert("Feedback received.");
   };
 
-  // --- NEW: Handle Suggestion Click ---
+  // --- Handle Suggestion Click ---
   const selectSuggestion = async (item: Suggestion) => {
     setSearchQuery(item.value);
     setShowSuggestions(false);
@@ -403,19 +419,18 @@ export default function AstaMap() {
       return;
     }
 
-    // 2. Is it a Place with an ID? (The BEST Way)
+    // 2. Is it a Place with an ID?
     if (item.placeId) {
       const details = await getPlaceDetails(item.placeId);
       handlePlaceResult(details, item.value);
       return;
     }
 
-    // 3. Fallback to Text Search (Legacy Way)
+    // 3. Fallback to Text Search
     const place = await searchPlace(item.value);
     handlePlaceResult(place, item.value);
   };
 
-  // Helper to handle map movement
   const handlePlaceResult = (place: any, queryName: string) => {
     if (place) {
       if (place.viewport) {
@@ -465,11 +480,9 @@ export default function AstaMap() {
     setIsSearching(false);
   };
 
-  // Handle Enter Key (Text Search)
   const executeSearch = async (query: string) => {
     const q = query.trim();
     if (!q) return;
-    // Treat as manual text search
     selectSuggestion({ type: 'location', value: q });
   };
 
@@ -483,32 +496,26 @@ export default function AstaMap() {
       return;
     }
 
-    // A. Local Features Matches
     const lower = val.toLowerCase();
     const localMatches = Array.from(new Set(listings.map((l) => l.location_name)))
       .filter((l) => l.toLowerCase().includes(lower))
       .slice(0, 2)
       .map((l) => ({ type: "location", value: l } as Suggestion));
 
-    // B. Trigger Google Autocomplete
     fetchGooglePredictions(val);
-    
-    // C. Combine
     setSuggestions(localMatches);
     setShowSuggestions(true);
   };
 
-  // EFFECT: Merge Google Predictions when they arrive
   useEffect(() => {
     if (googlePredictions && googlePredictions.length > 0) {
       const googleSuggestions = googlePredictions.slice(0, 3).map((p: any) => ({
         type: "location",
         value: p.description,
-        placeId: p.place_id // STORE THE ID
+        placeId: p.place_id
       } as Suggestion));
       
       setSuggestions(prev => {
-        // Dedup logic
         const existing = new Set(prev.map(p => p.value));
         const novel = googleSuggestions.filter((p: any) => !existing.has(p.value));
         return [...prev, ...novel];
@@ -841,10 +848,7 @@ export default function AstaMap() {
                 <div className="ml-auto">
                   {user ? (
                     <button
-                      onClick={() => {
-                        setDossierSection("dashboard");
-                        setProfileOpen(true);
-                      }}
+                      onClick={() => openDossier('dashboard')} // UPDATED
                       className="text-[10px] font-bold text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
                     >
                       <LayoutDashboard size={12} /> DOSSIER
@@ -886,7 +890,7 @@ export default function AstaMap() {
                     {suggestions.map((item, i) => (
                       <div
                         key={i}
-                        onClick={() => selectSuggestion(item)} // CHANGED: Call new handler
+                        onClick={() => selectSuggestion(item)} 
                         className="flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 cursor-pointer transition-colors border-b border-white/5 last:border-0"
                       >
                         {item.type === "location" ? (
@@ -1081,11 +1085,13 @@ export default function AstaMap() {
             />
           )}
         </AnimatePresence>
+        
+        {/* REPLACED: isProfileOpen -> URL controlled state */}
         <AnimatePresence>
           {isProfileOpen && (
             <UnifiedCommandCenter
-              onClose={() => setProfileOpen(false)}
-              initialSection={dossierSection}
+              onClose={closeDossier} // UPDATED
+              initialSection={dossierSection} // UPDATED
             />
           )}
         </AnimatePresence>
@@ -1129,8 +1135,7 @@ export default function AstaMap() {
                   onClick={() => {
                     setShowEmptyState(null);
                     if (user) {
-                      setDossierSection("hunter");
-                      setProfileOpen(true);
+                      openDossier('hunter'); // UPDATED
                     } else {
                       setAuthModalOpen(true);
                     }
