@@ -29,19 +29,20 @@ import {
   Brain,
   X,
   Bug,
-  MessageSquare,
   Send,
   LogIn,
   LayoutDashboard,
   Plus,
   Check,
   BellRing,
-  Crosshair, // NEW: Locate Icon
-  Shield, // NEW: Trust Radar Icon
+  Crosshair, 
+  Shield, 
 } from "lucide-react";
 import { useLiveListings } from "../hooks/useLiveListings";
 import { useAuth } from "../hooks/useAuth";
 import { useGooglePlaces } from "../hooks/useGooglePlaces";
+// IMPORT FIX: Added the autocomplete hook
+import { useGoogleAutocomplete } from "../hooks/useGoogleAutocomplete"; 
 import { useGeolocation } from "../hooks/useGeolocation";
 import { AnimatePresence, motion } from "framer-motion";
 import ListingCard from "./ListingCard";
@@ -196,11 +197,12 @@ interface Property {
   description?: string;
   type: "sale" | "rent";
   image_url?: string;
-  location_accuracy?: string; // Added for Trust Radar
+  location_accuracy?: string; 
 }
 interface Suggestion {
   type: "location" | "feature";
   value: string;
+  placeId?: string; // NEW: Robust Place ID
 }
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
@@ -213,6 +215,7 @@ export default function AstaMap() {
   const {
     reverseGeocode,
     searchPlace,
+    getPlaceDetails, // NEW: Robust Details
     loading: googleLoading,
   } = useGooglePlaces();
   const {
@@ -220,6 +223,12 @@ export default function AstaMap() {
     getCurrentLocation,
     loading: gpsLoading,
   } = useGeolocation();
+
+  const { 
+    predictions: googlePredictions, 
+    getPredictions: fetchGooglePredictions,
+    loading: autocompleteLoading 
+  } = useGoogleAutocomplete();
 
   const [isAuthModalOpen, setAuthModalOpen] = useState(false);
   const [isProfileOpen, setProfileOpen] = useState(false);
@@ -258,7 +267,6 @@ export default function AstaMap() {
   const [mapStyle, setMapStyle] = useState("mapbox://styles/mapbox/dark-v11");
   const [showHeatmap, setShowHeatmap] = useState(false);
 
-  // NEW: Trust Radar State
   const [showTrustRadar, setShowTrustRadar] = useState(false);
 
   const [showFeedback, setShowFeedback] = useState(false);
@@ -288,7 +296,6 @@ export default function AstaMap() {
       .catch((err) => console.error("Engine Offline"));
   }, []);
 
-  // GPS Effect: Fly to user when location updates
   useEffect(() => {
     if (gpsLocation && mapRef.current) {
       mapRef.current.flyTo({
@@ -308,7 +315,7 @@ export default function AstaMap() {
     setDrawPolygon(null);
     setSelectedListing(null);
     setShowHeatmap(false);
-    setShowTrustRadar(false); // Reset Trust Radar
+    setShowTrustRadar(false);
     setSearchBoundary(null);
     setShowEmptyState(null);
     setDraftLocation(null);
@@ -364,29 +371,18 @@ export default function AstaMap() {
     alert("Feedback received.");
   };
 
-  const executeSearch = async (query: string) => {
-    const q = query.trim();
-    if (!q) return;
-
-    setSearchQuery(q);
+  // --- NEW: Handle Suggestion Click ---
+  const selectSuggestion = async (item: Suggestion) => {
+    setSearchQuery(item.value);
     setShowSuggestions(false);
     setIsSearching(true);
     setShowEmptyState(null);
     setSearchBoundary(null);
 
-    const allFeatures = Array.from(
-      new Set(
-        listings.flatMap((l) =>
-          l.vibe_features
-            .replace(/[\[\]"']/g, "")
-            .toLowerCase()
-            .split(",")
-        )
-      )
-    );
-    if (allFeatures.some((f) => f.includes(q.toLowerCase()))) {
+    // 1. Is it a Vibe Feature?
+    if (item.type === 'feature') {
       const matches = listings.filter((l) =>
-        l.vibe_features.toLowerCase().includes(q.toLowerCase())
+        l.vibe_features.toLowerCase().includes(item.value.toLowerCase())
       );
       if (matches.length > 0) {
         const points = turf.featureCollection(
@@ -407,7 +403,20 @@ export default function AstaMap() {
       return;
     }
 
-    const place = await searchPlace(q);
+    // 2. Is it a Place with an ID? (The BEST Way)
+    if (item.placeId) {
+      const details = await getPlaceDetails(item.placeId);
+      handlePlaceResult(details, item.value);
+      return;
+    }
+
+    // 3. Fallback to Text Search (Legacy Way)
+    const place = await searchPlace(item.value);
+    handlePlaceResult(place, item.value);
+  };
+
+  // Helper to handle map movement
+  const handlePlaceResult = (place: any, queryName: string) => {
     if (place) {
       if (place.viewport) {
         const { northeast, southwest } = place.viewport;
@@ -440,7 +449,7 @@ export default function AstaMap() {
 
         if (!hasListings) {
           setTimeout(() => {
-            setShowEmptyState({ location: place.name, type: "hunter" });
+            setShowEmptyState({ location: place.name || queryName, type: "hunter" });
           }, 1500);
         }
       } else {
@@ -451,27 +460,62 @@ export default function AstaMap() {
         });
       }
     } else {
-      alert("Asta Intelligence could not locate " + q);
+      alert("Asta Intelligence could not locate " + queryName);
     }
     setIsSearching(false);
+  };
+
+  // Handle Enter Key (Text Search)
+  const executeSearch = async (query: string) => {
+    const q = query.trim();
+    if (!q) return;
+    // Treat as manual text search
+    selectSuggestion({ type: 'location', value: q });
   };
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setSearchQuery(val);
-    if (val.length < 2) {
+    
+    if (val.length < 3) {
       setSuggestions([]);
       setShowSuggestions(false);
       return;
     }
+
+    // A. Local Features Matches
     const lower = val.toLowerCase();
-    const locs = Array.from(new Set(listings.map((l) => l.location_name)))
+    const localMatches = Array.from(new Set(listings.map((l) => l.location_name)))
       .filter((l) => l.toLowerCase().includes(lower))
-      .slice(0, 3)
+      .slice(0, 2)
       .map((l) => ({ type: "location", value: l } as Suggestion));
-    setSuggestions(locs);
-    setShowSuggestions(locs.length > 0);
+
+    // B. Trigger Google Autocomplete
+    fetchGooglePredictions(val);
+    
+    // C. Combine
+    setSuggestions(localMatches);
+    setShowSuggestions(true);
   };
+
+  // EFFECT: Merge Google Predictions when they arrive
+  useEffect(() => {
+    if (googlePredictions && googlePredictions.length > 0) {
+      const googleSuggestions = googlePredictions.slice(0, 3).map((p: any) => ({
+        type: "location",
+        value: p.description,
+        placeId: p.place_id // STORE THE ID
+      } as Suggestion));
+      
+      setSuggestions(prev => {
+        // Dedup logic
+        const existing = new Set(prev.map(p => p.value));
+        const novel = googleSuggestions.filter((p: any) => !existing.has(p.value));
+        return [...prev, ...novel];
+      });
+      setShowSuggestions(true);
+    }
+  }, [googlePredictions]);
 
   const applyPricePreset = (label: string) => {
     if (label === "Budget") {
@@ -488,7 +532,6 @@ export default function AstaMap() {
     }
   };
 
-  // --- FILTER LOGIC (UPDATED WITH TRUST RADAR) ---
   const filteredListings = useMemo(() => {
     return listings.filter((l) => {
       if (!l.price || l.lat === 0) return false;
@@ -499,7 +542,6 @@ export default function AstaMap() {
       const max = maxPrice ? parseFloat(maxPrice) : Infinity;
       const matchesPrice = price >= min && price <= max;
 
-      // Trust Radar Logic: Only show high accuracy listings if enabled
       let matchesTrust = true;
       if (showTrustRadar) {
         matchesTrust = l.location_accuracy === "high";
@@ -518,7 +560,7 @@ export default function AstaMap() {
     drawPolygon,
     minPrice,
     maxPrice,
-    showTrustRadar, // Added dependency
+    showTrustRadar, 
   ]);
 
   const geojsonData: FeatureCollection = useMemo(() => {
@@ -624,7 +666,6 @@ export default function AstaMap() {
           <Layer {...priceLabelLayer} />
         </Source>
 
-        {/* DRAGGABLE MARKER */}
         {draftLocation && (
           <Marker
             longitude={draftLocation.long}
@@ -679,9 +720,7 @@ export default function AstaMap() {
           onDelete={onDrawDelete}
         />
 
-        {/* --- MAP CONTROL STACK (Consolidated & Simplified) --- */}
         <div className="absolute top-4 right-4 md:bottom-32 md:top-auto md:right-[10px] flex flex-col gap-2 z-10">
-          {/* LOCATE ME */}
           <button
             onClick={getCurrentLocation}
             className="w-[29px] h-[29px] bg-white rounded-md shadow flex items-center justify-center hover:bg-emerald-50 text-emerald-600 border border-gray-300 transition-colors"
@@ -694,7 +733,6 @@ export default function AstaMap() {
             )}
           </button>
 
-          {/* RESET */}
           <button
             onClick={handleReset}
             className="w-[29px] h-[29px] bg-white rounded-md shadow flex items-center justify-center hover:bg-red-50 text-red-600 border border-gray-300 transition-colors"
@@ -703,7 +741,6 @@ export default function AstaMap() {
             <RotateCcw size={16} />
           </button>
 
-          {/* THEME TOGGLE */}
           <button
             onClick={() =>
               setMapStyle((s) =>
@@ -718,11 +755,10 @@ export default function AstaMap() {
             {mapStyle.includes("dark") ? <Sun size={16} /> : <Moon size={16} />}
           </button>
 
-          {/* HEATMAP TOGGLE */}
           <button
             onClick={() => {
               setShowHeatmap(!showHeatmap);
-              setShowTrustRadar(false); // Disable trust if heatmap on
+              setShowTrustRadar(false); 
             }}
             className={`w-[29px] h-[29px] rounded-md shadow flex items-center justify-center transition-all border ${
               showHeatmap
@@ -734,11 +770,10 @@ export default function AstaMap() {
             <Layers size={16} />
           </button>
 
-          {/* NEW: TRUST RADAR TOGGLE */}
           <button
             onClick={() => {
               setShowTrustRadar(!showTrustRadar);
-              setShowHeatmap(false); // Disable heatmap if trust on
+              setShowHeatmap(false); 
             }}
             className={`w-[29px] h-[29px] rounded-md shadow flex items-center justify-center transition-all border ${
               showTrustRadar
@@ -750,7 +785,6 @@ export default function AstaMap() {
             <Shield size={16} />
           </button>
 
-          {/* BUG REPORT */}
           <button
             onClick={() => setShowFeedback(true)}
             className="w-[29px] h-[29px] bg-white rounded-md shadow flex items-center justify-center hover:bg-orange-50 text-orange-500 border border-gray-300 transition-colors"
@@ -759,7 +793,6 @@ export default function AstaMap() {
             <Bug size={16} />
           </button>
 
-          {/* LIST NEW */}
           <button
             onClick={handleManualListing}
             className="w-[29px] h-[29px] bg-emerald-600 rounded-md shadow flex items-center justify-center hover:bg-emerald-500 text-white border border-emerald-500 transition-colors"
@@ -784,7 +817,6 @@ export default function AstaMap() {
              inset-x-0 bottom-0 h-[80vh] rounded-t-xl border-t border-white/20 md:rounded-none md:border-t-0
           `}
         >
-          {/* ... SIDEBAR CONTENT (UNCHANGED) ... */}
           <div className="flex-1 flex flex-col bg-asta-deep/95 backdrop-blur-md h-full relative">
             <div
               className="md:hidden flex justify-center pt-2 pb-1 cursor-pointer"
@@ -828,7 +860,6 @@ export default function AstaMap() {
                 </div>
               </div>
 
-              {/* SEARCH & FILTERS (UNCHANGED) */}
               <div className="relative mb-3 z-50">
                 <div className="relative">
                   <input
@@ -844,7 +875,7 @@ export default function AstaMap() {
                     }}
                     className="w-full bg-black/40 border border-white/10 rounded-lg py-2 pl-3 pr-8 text-sm text-white focus:outline-none focus:border-emerald-500/50 transition-all font-mono"
                   />
-                  {isSearching ? (
+                  {isSearching || autocompleteLoading ? (
                     <Loader2 className="absolute right-3 top-2.5 text-emerald-500 w-4 h-4 animate-spin" />
                   ) : (
                     <Search className="absolute right-3 top-2.5 text-gray-500 w-4 h-4" />
@@ -855,7 +886,7 @@ export default function AstaMap() {
                     {suggestions.map((item, i) => (
                       <div
                         key={i}
-                        onClick={() => executeSearch(item.value)}
+                        onClick={() => selectSuggestion(item)} // CHANGED: Call new handler
                         className="flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 cursor-pointer transition-colors border-b border-white/5 last:border-0"
                       >
                         {item.type === "location" ? (

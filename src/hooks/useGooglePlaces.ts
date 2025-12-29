@@ -1,54 +1,122 @@
-import { useState } from 'react';
-
-const GOOGLE_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY || "";
+import { useState, useCallback } from 'react';
+import { getPlacesService, getGeocoder } from '../lib/google';
 
 export function useGooglePlaces() {
   const [loading, setLoading] = useState(false);
 
-  // 1. Reverse Geocode (Lat/Lng -> Address)
-  const reverseGeocode = async (lat: number, lng: number) => {
+  // 1. Text Search (Legacy / Fallback)
+  const searchPlace = useCallback(async (query: string) => {
     setLoading(true);
     try {
-      const res = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_KEY}`
-      );
-      const data = await res.json();
-      return data.results?.[0]?.formatted_address || null;
-    } catch (e) {
-      console.error("Reverse Geo Failed", e);
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  };
+      const service = await getPlacesService();
+      if (!service) return null;
 
-  // 2. Search Place (Text -> Viewport/Bounds)
-  const searchPlace = async (query: string) => {
-    setLoading(true);
-    try {
-      // Prioritize Ghana (components=country:GH)
-      const res = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&components=country:GH&key=${GOOGLE_KEY}`
-      );
-      const data = await res.json();
-      
-      if (data.results && data.results.length > 0) {
-        const result = data.results[0];
-        return {
-          name: result.formatted_address, // e.g. "Prampram, Ghana"
-          location: result.geometry.location, // { lat, lng }
-          viewport: result.geometry.viewport, // { northeast, southwest } - The Geo Fence!
-          place_id: result.place_id
+      return new Promise<any>((resolve) => {
+        const request = {
+          query,
+          fields: ['name', 'geometry', 'formatted_address'],
         };
-      }
-      return null;
-    } catch (e) {
-      console.error("Place Search Failed", e);
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  return { reverseGeocode, searchPlace, loading };
+        service.findPlaceFromQuery(request, (results: any, status: any) => {
+          setLoading(false);
+          if (status === 'OK' && results && results.length > 0) {
+            resolve({
+              name: results[0].name,
+              address: results[0].formatted_address,
+              location: {
+                lat: results[0].geometry.location.lat(),
+                lng: results[0].geometry.location.lng(),
+              },
+              viewport: results[0].geometry.viewport ? {
+                northeast: {
+                  lat: results[0].geometry.viewport.getNorthEast().lat(),
+                  lng: results[0].geometry.viewport.getNorthEast().lng()
+                },
+                southwest: {
+                  lat: results[0].geometry.viewport.getSouthWest().lat(),
+                  lng: results[0].geometry.viewport.getSouthWest().lng()
+                }
+              } : null
+            });
+          } else {
+            resolve(null);
+          }
+        });
+      });
+    } catch (error) {
+      console.error("Search Error:", error);
+      setLoading(false);
+      return null;
+    }
+  }, []);
+
+  // 2. Place Details (Robust - Uses Place ID)
+  const getPlaceDetails = useCallback(async (placeId: string) => {
+    setLoading(true);
+    try {
+      const service = await getPlacesService();
+      if (!service) return null;
+
+      return new Promise<any>((resolve) => {
+        const request = {
+          placeId: placeId,
+          fields: ['name', 'geometry', 'formatted_address'],
+        };
+
+        service.getDetails(request, (place: any, status: any) => {
+          setLoading(false);
+          if (status === 'OK' && place) {
+            resolve({
+              name: place.name,
+              address: place.formatted_address,
+              location: {
+                lat: place.geometry.location.lat(),
+                lng: place.geometry.location.lng(),
+              },
+              viewport: place.geometry.viewport ? {
+                northeast: {
+                  lat: place.geometry.viewport.getNorthEast().lat(),
+                  lng: place.geometry.viewport.getNorthEast().lng()
+                },
+                southwest: {
+                  lat: place.geometry.viewport.getSouthWest().lat(),
+                  lng: place.geometry.viewport.getSouthWest().lng()
+                }
+              } : null
+            });
+          } else {
+            console.warn("Place Details Failed:", status);
+            resolve(null);
+          }
+        });
+      });
+    } catch (error) {
+      console.error("Details Error:", error);
+      setLoading(false);
+      return null;
+    }
+  }, []);
+
+  // 3. Geocoding (Address -> Lat/Lng)
+  const reverseGeocode = useCallback(async (lat: number, lng: number) => {
+    setLoading(true);
+    try {
+      const geocoder = await getGeocoder();
+      return new Promise<string | null>((resolve) => {
+        geocoder.geocode({ location: { lat, lng } }, (results: any, status: any) => {
+          setLoading(false);
+          if (status === 'OK' && results[0]) {
+            resolve(results[0].formatted_address);
+          } else {
+            resolve(null);
+          }
+        });
+      });
+    } catch (error) {
+      setLoading(false);
+      return null;
+    }
+  }, []);
+
+  return { searchPlace, getPlaceDetails, reverseGeocode, loading };
 }

@@ -17,21 +17,28 @@ export function useGoogleAutocomplete() {
     }
 
     setLoading(true);
-    service.getPlacePredictions(
-      {
-        input,
-        componentRestrictions: { country: "gh" },
-        types: ["(regions)"],
-      },
-      (results: any, status: any) => {
-        setLoading(false);
-        if (status === "OK" && results) {
-          setPredictions(results);
-        } else {
-          setPredictions([]);
+    try {
+      service.getPlacePredictions(
+        {
+          input,
+          componentRestrictions: { country: "gh" },
+          // We don't restrict types strictly to (regions) to allow specific landmarks too
+        },
+        (results: any, status: any) => {
+          setLoading(false);
+          // Check for OK or ZERO_RESULTS status
+          if ((status === "OK" || status === "ZERO_RESULTS") && results) {
+            setPredictions(results);
+          } else {
+            setPredictions([]);
+          }
         }
-      }
-    );
+      );
+    } catch (e) {
+      console.error("Autocomplete Error:", e);
+      setLoading(false);
+      setPredictions([]);
+    }
   }, [service]);
 
   return { predictions, getPredictions, loading, setPredictions };
