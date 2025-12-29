@@ -12,7 +12,7 @@ export interface IntelMessage {
   priority: 'high' | 'medium' | 'low';
   status: 'unread' | 'read';
   type: 'intel' | 'system' | 'alert';
-  property_id?: number; 
+  property_id?: string;
 }
 
 export function useHunterIntel(profile: UserProfile | null) {
@@ -26,69 +26,95 @@ export function useHunterIntel(profile: UserProfile | null) {
     const fetchIntel = async () => {
       setLoading(true);
       
+      const { data: dbMessages, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('recipient_id', profile.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching intel:', error);
+      }
+
+      const realMessages: IntelMessage[] = (dbMessages || []).map((msg: any) => {
+        const msgType = msg.is_system_alert ? 'alert' : 'intel';
+        // Explicitly check for non-null read_at
+        const status = msg.read_at ? 'read' : 'unread';
+        
+        const lines = msg.content.split('\n');
+        const subject = lines[0].replace(/\*\*/g, '').replace('HUNTER ALERT:', '').trim() || 'Incoming Transmission';
+        const preview = lines[1] || lines[0];
+
+        return {
+          id: msg.id,
+          sender: msg.sender_id ? 'Field Agent' : 'ASTA SYSTEM',
+          subject: subject,
+          preview: preview.substring(0, 50) + '...',
+          body: msg.content,
+          timestamp: new Date(msg.created_at).toLocaleDateString(),
+          priority: msg.is_system_alert ? 'high' : 'medium',
+          status: status,
+          type: msgType,
+          property_id: msg.property_id ? msg.property_id.toString() : undefined
+        };
+      });
+
       const systemMsg: IntelMessage = {
-        id: 'sys-001',
+        id: 'sys-welcome',
         sender: 'Central Command',
         subject: 'Identity Verified',
         preview: 'Access granted to Level 2 telemetry...',
-        body: `AGENT: ${profile.full_name || 'Unknown'}\nRANK: ${profile.rank_title}\n\nYour neural link to the Asta Network is stable.\n\nReputation Score: ${profile.reputation_score}\n\nUse the "Hunter Config" module to calibrate your target zones.`,
+        body: `AGENT: ${profile.full_name || 'Unknown'}\nRANK: ${profile.rank_title}\n\nYour neural link to the Asta Network is stable.\n\nReputation Score: ${profile.reputation_score || 0}\n\nUse the "Hunter Config" module to calibrate your target zones.`,
         timestamp: 'Now',
         priority: 'low',
-        status: 'read', // System message is always read
+        status: 'read', 
         type: 'system'
       };
 
-      let dealMessages: IntelMessage[] = [];
-      const prefs = profile.preferences;
-
-      if (prefs && prefs.locations && prefs.locations.length > 0) {
-        const { data: matches } = await supabase
-          .from('properties') 
-          .select('*')
-          .in('location_name', prefs.locations) 
-          .lte('price', prefs.budget_max || 10000000)
-          .limit(5);
-
-        if (matches && matches.length > 0) {
-           dealMessages = matches.map((property: any) => ({
-             id: `intel-${property.id}`,
-             sender: 'Hunter Algorithm',
-             subject: `Target Acquired: ${property.location_name}`,
-             preview: `Asset matches criteria: ${property.title}...`,
-             body: `MATCH CONFIRMED // CONFIDENCE: 98%\n\nAsset: ${property.title}\nZone: ${property.location_name}\nPrice: ${property.currency === 'USD' ? '$' : '₵'}${property.price.toLocaleString()}\n\nLogic: Matches your interest in ${property.location_name}.\n\nRecommending visual verification.`,
-             timestamp: 'Just now',
-             priority: 'high',
-             status: 'unread',
-             type: 'intel',
-             property_id: property.id
-           }));
-        } else {
-           dealMessages.push({
-             id: 'sys-scan-empty',
-             sender: 'Hunter Algorithm',
-             subject: 'Scan Complete: No Targets',
-             preview: 'Market scan of designated zones yielded 0 results...',
-             body: `SCAN REPORT // SECTOR: ${prefs.locations.join(', ')}\n\nNo active assets found matching your strict criteria.\n\nRecommendation:\n1. Increase Budget Cap.\n2. Expand Target Zones in Config.\n\nSystem will continue monitoring.`,
-             timestamp: 'Just now',
-             priority: 'medium',
-             status: 'unread',
-             type: 'alert'
-           });
-        }
-      }
-
-      setMessages([systemMsg, ...dealMessages]);
+      setMessages([systemMsg, ...realMessages]);
       setLoading(false);
     };
 
     fetchIntel();
+    
+    const subscription = supabase
+      .channel('public:messages')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `recipient_id=eq.${profile.id}` }, (payload) => {
+         // Listen for ALL events (including UPDATE) to keep read status in sync
+         fetchIntel();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
+
   }, [profile]);
 
-  // NEW ACTION: Mark message as read
-  const markAsRead = (id: string) => {
+  // NEW ACTION: Mark message as read (PERSISTENT)
+  const markAsRead = async (id: string) => {
+    // 1. Optimistic Update
     setMessages(prev => prev.map(msg => 
       msg.id === id ? { ...msg, status: 'read' } : msg
     ));
+
+    if (id.startsWith('sys-')) return;
+
+    // 2. Database Update
+    // We select the ID returned to ensure a row was actually touched
+    const { data, error } = await supabase
+      .from('messages')
+      .update({ read_at: new Date().toISOString() })
+      .eq('id', id)
+      .select();
+
+    if (error) {
+      console.error('CRITICAL: Failed to update DB:', error);
+    } else if (data.length === 0) {
+      console.error('CRITICAL: RLS Policy blocked the update. Row not modified.');
+    } else {
+      console.log('Message successfully marked read in DB.');
+    }
   };
 
   return { messages, loading, markAsRead };
