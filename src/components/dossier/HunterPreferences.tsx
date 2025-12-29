@@ -1,12 +1,31 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Target, MapPin, DollarSign, X, Plus, Loader2, CheckCircle2, Search, Crosshair, Navigation, RefreshCw } from 'lucide-react';
+import { Target, DollarSign, X, Loader2, CheckCircle2, Search, Crosshair, Navigation, RefreshCw, Info } from 'lucide-react';
 import { useGoogleAutocomplete } from '../../hooks/useGoogleAutocomplete';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface HunterPreferencesProps {
   preferences: any;
-  onUpdate: (key: string, value: any) => void;
+  // Updated signature to accept a full object, matching the parent's handler
+  onUpdate: (updates: any) => void;
 }
+
+// --- INTERNAL COMPONENT: DIRECTIVE TOOLTIP ---
+const DirectiveTooltip = () => (
+  <div className="group relative inline-block ml-2 pointer-events-auto z-50">
+    <Info size={14} className="text-emerald-500/50 hover:text-emerald-400 cursor-help transition-colors" />
+    <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-64 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-50">
+      <div className="bg-black/95 backdrop-blur-xl border border-emerald-500/30 text-white text-[10px] p-3 rounded-lg shadow-[0_0_20px_rgba(16,185,129,0.2)]">
+        <h4 className="font-bold text-emerald-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+          <Target size={10} /> Protocol Directives
+        </h4>
+        <p className="text-gray-400 leading-relaxed">
+          Define your <strong>Authorized Sectors</strong> to restrict surveillance to specific neighborhoods. Set your <strong>Valuation Cap</strong> to filter out assets exceeding your capital deployment limits.
+        </p>
+        <div className="w-2 h-2 bg-black border-r border-b border-emerald-500/30 rotate-45 absolute left-1/2 -translate-x-1/2 -bottom-1"></div>
+      </div>
+    </div>
+  </div>
+);
 
 export default function HunterPreferences({ preferences, onUpdate }: HunterPreferencesProps) {
   const { predictions, getPredictions, loading: searching, setPredictions } = useGoogleAutocomplete();
@@ -14,12 +33,26 @@ export default function HunterPreferences({ preferences, onUpdate }: HunterPrefe
   
   // CURRENCY STATE
   const [currency, setCurrency] = useState<'GHS' | 'USD'>('GHS');
-  const EX_RATE = 12.5; // Example conversion rate
+  const EX_RATE = 12.5; 
 
+  // Local state for budget to allow sliding without constant DB updates
   const [budget, setBudget] = useState(preferences?.budget_max || 250000);
+  
+  // OPTIMISTIC STATE: Locations
+  // We use this to render updates instantly while the DB syncs in the background
+  const [localLocations, setLocalLocations] = useState<string[]>(preferences?.locations || []);
+  
+  // Feedback State
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const activeZones = preferences?.locations || [];
+  // Sync local state when props change (e.g. initial load or external update)
+  useEffect(() => {
+    if (preferences?.budget_max) setBudget(preferences.budget_max);
+    if (preferences?.locations) setLocalLocations(preferences.locations);
+  }, [preferences]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -39,20 +72,53 @@ export default function HunterPreferences({ preferences, onUpdate }: HunterPrefe
   };
 
   const selectZone = (description: string) => {
+    // 1. Clean the name (remove ", Ghana" for the tag)
     const cleanName = description.split(',')[0].trim();
-    if (!activeZones.includes(cleanName)) {
-      onUpdate('locations', [...activeZones, cleanName]);
+    
+    // 2. Prevent duplicates & Optimistic Update
+    if (!localLocations.includes(cleanName)) {
+      const newZones = [...localLocations, cleanName];
+      setLocalLocations(newZones); // Update UI instantly
+      
+      // FIX: Send object payload, not key/value
+      onUpdate({ locations: newZones }); 
     }
+    
+    // 3. Reset UI
     setInputZone('');
     setPredictions([]);
   };
 
-  const removeZone = (zone: string) => {
-    onUpdate('locations', activeZones.filter((z: string) => z !== zone));
+  const removeZone = (e: React.MouseEvent, zone: string) => {
+    e.stopPropagation(); 
+    const newZones = localLocations.filter((z: string) => z !== zone);
+    setLocalLocations(newZones); // Update UI instantly
+    
+    // FIX: Send object payload
+    onUpdate({ locations: newZones });
+  };
+
+  const handleSaveProtocol = async () => {
+    setIsSaving(true);
+    
+    // Simulate network delay for "Tactical Feel"
+    await new Promise(r => setTimeout(r, 600));
+    
+    // FIX: Send object payload
+    onUpdate({ budget_max: budget });
+    
+    setIsSaving(false);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2000);
   };
 
   // Convert budget for display based on currency toggle
   const displayBudget = currency === 'GHS' ? budget : budget / EX_RATE;
+
+  // STRICT GHANA FILTERING: Filter predictions to show GHANA only
+  const filteredPredictions = predictions.filter((p: any) => 
+    p.description.toLowerCase().includes('ghana')
+  );
 
   return (
     <div className="bg-black/60 border border-emerald-500/20 rounded-xl p-6 h-full flex flex-col relative overflow-visible shadow-[0_0_50px_rgba(16,185,129,0.05)]">
@@ -63,7 +129,10 @@ export default function HunterPreferences({ preferences, onUpdate }: HunterPrefe
           <div className="p-1.5 bg-emerald-500/10 rounded border border-emerald-500/30">
             <Target className="text-emerald-500" size={18} />
           </div>
-          <h2 className="text-sm font-black text-white uppercase tracking-[0.2em]">Hunter Directives</h2>
+          <h2 className="text-sm font-black text-white uppercase tracking-[0.2em] flex items-center">
+            Hunter Directives
+            <DirectiveTooltip />
+          </h2>
         </div>
         <p className="text-[10px] text-emerald-500/60 font-mono uppercase tracking-wider">
           Sector Surveillance & Capital Thresholds
@@ -90,14 +159,14 @@ export default function HunterPreferences({ preferences, onUpdate }: HunterPrefe
           </div>
 
           <AnimatePresence>
-            {predictions.length > 0 && (
+            {inputZone.length > 2 && filteredPredictions.length > 0 && (
               <motion.div 
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 className="absolute top-full left-0 right-0 mt-2 bg-[#0A0A0A] border border-emerald-500/30 rounded-lg shadow-2xl z-[200] overflow-hidden"
               >
-                {predictions.map((p: any) => (
+                {filteredPredictions.map((p: any) => (
                   <button
                     key={p.place_id}
                     onClick={() => selectZone(p.description)}
@@ -117,7 +186,7 @@ export default function HunterPreferences({ preferences, onUpdate }: HunterPrefe
         </div>
 
         <div className="flex flex-wrap gap-2 min-h-[32px]">
-          {activeZones.map((zone: string) => (
+          {localLocations.map((zone: string) => (
             <motion.span 
               layout
               initial={{ scale: 0.8, opacity: 0 }}
@@ -128,7 +197,7 @@ export default function HunterPreferences({ preferences, onUpdate }: HunterPrefe
               <Crosshair size={10} className="text-emerald-500/50" />
               {zone}
               <button 
-                onClick={() => removeZone(zone)}
+                onClick={(e) => removeZone(e, zone)}
                 className="text-gray-600 hover:text-red-500 transition-colors"
               >
                 <X size={12} />
@@ -184,12 +253,29 @@ export default function HunterPreferences({ preferences, onUpdate }: HunterPrefe
         </div>
       </div>
 
-      {/* Save Button */}
+      {/* Save Button with Feedback */}
       <button 
-        onClick={() => onUpdate('budget_max', budget)}
-        className="mt-auto w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase tracking-[0.2em] rounded-lg transition-all shadow-[0_0_20px_rgba(16,185,129,0.2)] flex items-center justify-center gap-2"
+        onClick={handleSaveProtocol}
+        disabled={isSaving || saveSuccess}
+        className={`mt-auto w-full py-4 font-black text-[10px] uppercase tracking-[0.2em] rounded-lg transition-all shadow-[0_0_20px_rgba(16,185,129,0.2)] flex items-center justify-center gap-2 ${
+          saveSuccess 
+            ? "bg-white text-emerald-600 border border-emerald-500" 
+            : "bg-emerald-600 hover:bg-emerald-500 text-white"
+        }`}
       >
-        <CheckCircle2 size={14} /> Update Hunter Protocol
+        {isSaving ? (
+          <>
+            <RefreshCw size={14} className="animate-spin" /> UPDATING PROTOCOL...
+          </>
+        ) : saveSuccess ? (
+          <>
+            <CheckCircle2 size={14} /> PROTOCOL ACTIVE
+          </>
+        ) : (
+          <>
+            <CheckCircle2 size={14} /> UPDATE HUNT PROTOCOL
+          </>
+        )}
       </button>
 
       {/* Bottom status line */}
