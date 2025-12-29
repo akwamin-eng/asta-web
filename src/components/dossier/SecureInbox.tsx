@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
+import { useSearchParams } from 'react-router-dom';
 import { 
   Shield, AlertTriangle, Clock, Search, ChevronRight, FileText, Lock, Trash2, Archive, ExternalLink, Loader2 
 } from 'lucide-react';
@@ -9,15 +10,16 @@ interface SecureInboxProps {
   messages: IntelMessage[];
   loading: boolean;
   onRead: (id: string) => void;
+  onViewAsset?: (id: string) => void; 
 }
 
-export default function SecureInbox({ messages, loading, onRead }: SecureInboxProps) {
+export default function SecureInbox({ messages, loading, onRead, onViewAsset }: SecureInboxProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState(''); // NEW: Search State
+  const [searchTerm, setSearchTerm] = useState(''); 
+  const [_, setSearchParams] = useSearchParams(); // Hook for URL updates
 
   const selectedMessage = messages.find(m => m.id === selectedId);
 
-  // NEW: FILTER LOGIC
   const filteredMessages = messages.filter(msg => {
     const term = searchTerm.toLowerCase();
     return (
@@ -30,6 +32,17 @@ export default function SecureInbox({ messages, loading, onRead }: SecureInboxPr
   const handleSelect = (id: string) => {
     setSelectedId(id);
     onRead(id);
+  };
+
+  const handleOpenAsset = (propertyId: string) => {
+    if (onViewAsset) {
+      onViewAsset(propertyId);
+    } else {
+      // FIX: Use setSearchParams to switch views WITHOUT reloading the page.
+      // We set 'listing_id' which the main map listens for.
+      // We do NOT include 'mode=dossier', effectively closing the UCC.
+      setSearchParams({ listing_id: propertyId });
+    }
   };
 
   const getIcon = (type: string) => {
@@ -62,8 +75,8 @@ export default function SecureInbox({ messages, loading, onRead }: SecureInboxPr
             <input 
               type="text" 
               placeholder="Search logs..." 
-              value={searchTerm} // NEW: Bind value
-              onChange={(e) => setSearchTerm(e.target.value)} // NEW: Handle Change
+              value={searchTerm} 
+              onChange={(e) => setSearchTerm(e.target.value)} 
               className="w-full bg-black/50 border border-white/10 rounded-md py-1.5 pl-8 pr-3 text-xs text-gray-300 focus:outline-none focus:border-emerald-500/50 transition-colors"
             />
           </div>
@@ -139,7 +152,7 @@ export default function SecureInbox({ messages, loading, onRead }: SecureInboxPr
               {selectedMessage.property_id && (
                  <div className="mt-8">
                     <button 
-                       onClick={() => window.open(`/listing/${selectedMessage.property_id}`, '_blank')}
+                       onClick={() => handleOpenAsset(selectedMessage.property_id!)}
                        className="bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 border border-blue-500/50 px-4 py-2 rounded flex items-center gap-2 text-xs font-bold uppercase tracking-wider transition-all"
                     >
                        <ExternalLink size={14} /> Open Asset Dossier

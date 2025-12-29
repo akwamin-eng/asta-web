@@ -17,7 +17,7 @@ import MapboxDraw from "@mapbox/mapbox-gl-draw";
 import "@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css";
 import * as turf from "@turf/turf";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { useSearchParams } from "react-router-dom"; // IMPORT FIX: Router Hook
+import { useSearchParams } from "react-router-dom"; 
 import {
   Sun,
   Moon,
@@ -235,19 +235,19 @@ export default function AstaMap() {
   
   // Is the Dossier open? Check the URL.
   const isProfileOpen = searchParams.get('mode') === 'dossier';
-  
   // Which section? Check the URL or default to dashboard
   const dossierSection = (searchParams.get('section') as "dashboard" | "hunter") || "dashboard";
+  
+  // URL-DRIVEN PROPERTY INSPECTION
+  const urlListingId = searchParams.get('listing_id');
 
   // --- HELPER TO OPEN DOSSIER ---
   const openDossier = (section: "dashboard" | "hunter") => {
-    // This updates the URL without reloading the page
     setSearchParams({ mode: 'dossier', section });
   };
 
   // --- HELPER TO CLOSE DOSSIER ---
   const closeDossier = () => {
-    // Remove the params to close the modal
     setSearchParams({});
   };
 
@@ -303,6 +303,25 @@ export default function AstaMap() {
 
   const mapRef = useRef<any>(null);
 
+  // --- EFFECT: Handle Deep Linking from Inbox ---
+  useEffect(() => {
+    if (urlListingId && listings.length > 0) {
+      const prop = listings.find(l => l.id.toString() === urlListingId);
+      if (prop) {
+        setSelectedListing(prop);
+        
+        // Fly to location
+        if (mapRef.current) {
+          mapRef.current.flyTo({
+            center: [prop.long, prop.lat],
+            zoom: 16,
+            duration: 2000
+          });
+        }
+      }
+    }
+  }, [urlListingId, listings]);
+
   useEffect(() => {
     fetch(`${ENGINE_URL}/api/trends`)
       .then((res) => res.json())
@@ -335,6 +354,10 @@ export default function AstaMap() {
     setSearchBoundary(null);
     setShowEmptyState(null);
     setDraftLocation(null);
+    
+    // Reset URL params if any
+    setSearchParams({});
+    
     mapRef.current?.flyTo({
       center: [INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude],
       zoom: INITIAL_VIEW_STATE.zoom,
@@ -509,18 +532,23 @@ export default function AstaMap() {
 
   useEffect(() => {
     if (googlePredictions && googlePredictions.length > 0) {
-      const googleSuggestions = googlePredictions.slice(0, 3).map((p: any) => ({
-        type: "location",
-        value: p.description,
-        placeId: p.place_id
-      } as Suggestion));
+      // FILTER: STRICT GHANA ONLY
+      // This prevents "Lab One, USA" from appearing when searching "Labone"
+      const googleSuggestions = googlePredictions
+        .filter((p: any) => p.description.toLowerCase().includes("ghana"))
+        .slice(0, 3)
+        .map((p: any) => ({
+          type: "location",
+          value: p.description,
+          placeId: p.place_id
+        } as Suggestion));
       
       setSuggestions(prev => {
         const existing = new Set(prev.map(p => p.value));
         const novel = googleSuggestions.filter((p: any) => !existing.has(p.value));
         return [...prev, ...novel];
       });
-      setShowSuggestions(true);
+      if (googleSuggestions.length > 0) setShowSuggestions(true);
     }
   }, [googlePredictions]);
 
@@ -1075,7 +1103,10 @@ export default function AstaMap() {
           {selectedListing && (
             <PropertyInspector
               property={selectedListing}
-              onClose={() => setSelectedListing(null)}
+              onClose={() => {
+                setSelectedListing(null);
+                setSearchParams({}); // Reset URL on close
+              }}
               onVerify={() =>
                 setVerifyingProp({
                   id: selectedListing.id.toString(),
