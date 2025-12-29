@@ -13,37 +13,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout Repository
+      - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: 🔍 DEBUG List all files
-        run: ls -R
-
-      - name: 🐍 Set up Python 3.11
+      - name: Set up Python 3.11
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      - name: 🧹 Nuclear Clean of Google Namespace
+      - name: Nuclear Clean of Google Namespace
         run: |
           pip uninstall -y google-generativeai google-ai-generativelanguage google-api-core || true
 
-      - name: 📦 Install Dependencies (Fresh)
+      - name: Install Dependencies
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
           python -c "import google.genai; print('✅ SDK Installed Successfully')"
 
-      - name: 📰 Run News Scout
+      - name: Run News Scout
         env:
           PYTHONPATH: .
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          ls -l scripts/fetch_google_news.py
           python scripts/fetch_google_news.py
 
-      - name: 🧠 Run Market Enrichment
+      - name: Run Market Enrichment
         env:
           PYTHONPATH: .
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -53,7 +49,7 @@ jobs:
         run: |
           python asta_run.py
 
-      - name: 🗣️ Run Social Listening
+      - name: Run Social Listening
         env:
           PYTHONPATH: .
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -65,7 +61,7 @@ jobs:
         run: |
           python scripts/update_social_signals.py
 
-      - name: 📈 Run Predictive Pulse
+      - name: Run Predictive Pulse
         env:
           PYTHONPATH: .
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
