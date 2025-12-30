@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Target, DollarSign, X, Loader2, CheckCircle2, Search, Crosshair, Navigation, RefreshCw, Info, Building, Home, Briefcase, GraduationCap, PartyPopper } from 'lucide-react';
 import { useGoogleAutocomplete } from '../../hooks/useGoogleAutocomplete';
 import { motion, AnimatePresence } from 'framer-motion';
+// NEW IMPORTS FOR DATABASE WRITE
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../hooks/useAuth';
 
 interface HunterPreferencesProps {
   preferences: any;
@@ -24,6 +27,8 @@ const SectionTooltip = ({ title, text }: { title: string, text: string }) => (
 
 export default function HunterPreferences({ preferences, onUpdate }: HunterPreferencesProps) {
   const { predictions, getPredictions, loading: searching, setPredictions } = useGoogleAutocomplete();
+  const { user } = useAuth(); // GET USER TO WRITE TO DB
+
   const [inputZone, setInputZone] = useState('');
   
   // CURRENCY STATE
@@ -42,16 +47,15 @@ export default function HunterPreferences({ preferences, onUpdate }: HunterPrefe
   const [saveSuccess, setSaveSuccess] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Sync props to state (Initial Load Only to prevent overwriting local edits)
+  // Sync props to state (Initial Load Only)
   useEffect(() => {
     if (preferences) {
       if (preferences.budget_max) setBudget(preferences.budget_max);
-      // We check length to ensure we don't overwrite if user is actively editing
       if (preferences.locations && localLocations.length === 0) setLocalLocations(preferences.locations);
       if (preferences.property_type && assetTypes.length === 0) setAssetTypes(preferences.property_type);
       if (preferences.lifestyle_tags && lifestyleTags.length === 0) setLifestyleTags(preferences.lifestyle_tags);
     }
-  }, [preferences]); // Removed dependency on local state to avoid loops
+  }, [preferences]); 
 
   // Click Outside Logic
   useEffect(() => {
@@ -77,7 +81,6 @@ export default function HunterPreferences({ preferences, onUpdate }: HunterPrefe
     if (!localLocations.includes(cleanName)) {
       const newZones = [...localLocations, cleanName];
       setLocalLocations(newZones); 
-      // BUG FIX: Do NOT call onUpdate here. Wait for explicit save.
     }
     setInputZone('');
     setPredictions([]);
@@ -87,7 +90,6 @@ export default function HunterPreferences({ preferences, onUpdate }: HunterPrefe
     e.stopPropagation(); 
     const newZones = localLocations.filter((z: string) => z !== zone);
     setLocalLocations(newZones);
-    // BUG FIX: Do NOT call onUpdate here. Wait for explicit save.
   };
 
   const toggleAssetType = (type: string) => {
@@ -106,16 +108,25 @@ export default function HunterPreferences({ preferences, onUpdate }: HunterPrefe
 
   const handleSaveProtocol = async () => {
     setIsSaving(true);
-    await new Promise(r => setTimeout(r, 600)); // Tactical Delay
     
-    // SEND ALL UPDATES AT ONCE
-    onUpdate({ 
-      locations: localLocations, // Send the zones now
+    // 1. Construct the payload
+    const updates = { 
+      locations: localLocations,
       budget_max: budget,
       property_type: assetTypes,
       lifestyle_tags: lifestyleTags
-    });
+    };
+
+    // 2. Write to DB (This enables the Map to see the changes)
+    if (user) {
+      await supabase.from("profiles").update({ preferences: updates }).eq("id", user.id);
+    }
+
+    // 3. Update Local State (via parent)
+    onUpdate(updates);
     
+    // 4. UX Feedback
+    await new Promise(r => setTimeout(r, 600)); 
     setIsSaving(false);
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 2000);
@@ -220,12 +231,11 @@ export default function HunterPreferences({ preferences, onUpdate }: HunterPrefe
             <Building size={10} /> Asset Class
             <SectionTooltip title="Asset Classification" text="Filter by property structure. 'Apt' includes condos/flats. 'House' includes townhomes and detached units." />
           </label>
-          <div className="grid grid-cols-3 gap-2"> {/* Changed to 3 cols */}
+          <div className="grid grid-cols-3 gap-2"> 
             {[
               { id: 'apartment', label: 'Apt', icon: Building },
               { id: 'house', label: 'House', icon: Home },
               { id: 'commercial', label: 'Comm.', icon: Briefcase }
-              // REMOVED LAND
             ].map((type) => {
               const isActive = assetTypes.includes(type.id);
               const Icon = type.icon;

@@ -10,11 +10,9 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertTriangle,
-  Info,
   Send,
   User,
   Phone,
-  Share2,
   Sparkles,
   Loader2
 } from "lucide-react";
@@ -31,7 +29,6 @@ import TrustScorecard from "./intel/TrustScorecard";
 import MarketPulse from "./intel/MarketPulse";
 import TrueCostCalculator from "./intel/TrueCostCalculator";
 
-// FIX: Corrected import path from ../../ to ../
 import { useLeadRouter } from '../hooks/useLeadRouter';
 
 interface PropertyInspectorProps {
@@ -39,20 +36,6 @@ interface PropertyInspectorProps {
   onClose: () => void;
   onVerify?: () => void;
 }
-
-// --- INTELLIGENCE TOOLTIP ---
-const IntelTooltip = ({ children, title, desc }: { children: React.ReactNode; title: string; desc: string }) => (
-  <div className="group relative w-full">
-    {children}
-    <div className="absolute left-0 -top-12 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-50 w-full hidden md:block">
-      <div className="bg-black/90 backdrop-blur-md border border-white/20 text-white text-[10px] p-2 rounded-lg shadow-xl flex flex-col gap-0.5">
-        <span className="font-bold text-emerald-400 uppercase tracking-wider">{title}</span>
-        <span className="text-gray-400 leading-tight">{desc}</span>
-      </div>
-      <div className="w-2 h-2 bg-white/20 rotate-45 absolute left-8 -bottom-1 transform translate-y-1/2"></div>
-    </div>
-  </div>
-);
 
 export default function PropertyInspector({
   property,
@@ -77,13 +60,18 @@ export default function PropertyInspector({
   const [isContactOpen, setContactOpen] = useState(false);
   const [inquirer, setInquirer] = useState({ name: "", phone: "", message: "" });
   
-  // NEW: Lead Router Hook
+  // LEAD ROUTER HOOK
   const { createLeadAndRedirect, loading: routingLead } = useLeadRouter();
 
   const data = property;
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUser(data.user));
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user);
+      if (data.user?.user_metadata?.full_name) {
+        setInquirer(prev => ({ ...prev, name: data.user.user_metadata.full_name }));
+      }
+    });
   }, []);
 
   const handleGatekeptAction = (action: () => void) => {
@@ -126,22 +114,24 @@ export default function PropertyInspector({
   // --- ACTIONS ---
   
   const handleOpenContact = () => {
-    setInquirer({
-      name: "",
-      phone: "",
+    setInquirer(prev => ({
+      ...prev,
       message: `Hello, I am interested in ${data.title} (${data.location_name}). Is it available for viewing?`
-    });
+    }));
     setContactOpen(true);
   };
 
   const handleSendInquiry = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Trigger the Lead Router (WhatsApp Bridge)
     const result = await createLeadAndRedirect(data, inquirer, user);
     
     if (result.success) {
       setContactOpen(false);
       setToastMessage("Secure Link Established: Redirecting to WhatsApp...");
+    } else {
+      setToastMessage("Connection Failed. Please try again.");
     }
   };
 
