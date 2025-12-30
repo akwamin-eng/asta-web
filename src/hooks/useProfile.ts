@@ -87,17 +87,57 @@ export function useProfile() {
     fetchDossier();
   }, [fetchDossier]);
 
+  // --- UPDATE LOGIC ---
+  const updatePreferences = async (newPrefs: any) => {
+    // 1. Optimistic Update (UI)
+    const mergedPrefs = { ...preferences, ...newPrefs };
+    setPreferences(mergedPrefs);
+
+    if (profile) {
+      // Optimistically update top-level profile fields if present in newPrefs
+      const tempProfile = { ...profile, ...newPrefs };
+      if (newPrefs.hunter_preferences) {
+         tempProfile.hunter_preferences = { ...profile.hunter_preferences, ...newPrefs.hunter_preferences };
+      }
+      setProfile(tempProfile);
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // 2. Prepare DB Update
+    // We separate JSONB preferences from top-level columns (like full_name, reputation_score)
+    const updates: any = { 
+      updated_at: new Date().toISOString()
+    };
+
+    // If 'preferences' key exists, treat it as the JSONB column
+    // Note: Your DB schema seems to use 'preferences' or 'hunter_preferences'. 
+    // Adapting to match your existing code's pattern:
+    if (newPrefs.locations || newPrefs.budget_max || newPrefs.deal_trigger_percent) {
+        updates.preferences = mergedPrefs; 
+    }
+
+    // Handle Top-Level Columns for Gamification/Identity
+    if (newPrefs.full_name) updates.full_name = newPrefs.full_name;
+    if (newPrefs.scout_segment) updates.scout_segment = newPrefs.scout_segment;
+    if (newPrefs.avatar_url) updates.avatar_url = newPrefs.avatar_url;
+    if (newPrefs.rank_title) updates.rank_title = newPrefs.rank_title;
+    if (newPrefs.reputation_score) updates.reputation_score = newPrefs.reputation_score;
+
+    await supabase.from('profiles').update(updates).eq('id', user.id);
+    
+    // 3. Sync to get any trigger-based updates (like new badges)
+    await fetchDossier();
+  };
+
   return { 
     profile, 
     watchlist, 
     preferences, 
     loading, 
-    updatePreferences: async (newPrefs: Partial<HunterPreferences>) => {
-        // Optimistic Update
-        setPreferences(p => ({...p, ...newPrefs}));
-        const { data: { user } } = await supabase.auth.getUser();
-        if(user) await supabase.from('profiles').update({preferences: {...preferences, ...newPrefs}}).eq('id', user.id);
-    }, 
+    refreshProfile: fetchDossier, // <--- EXPORTED HERE (Fixes the crash)
+    updatePreferences, 
     removeFromWatchlist: async (id: number) => {
         setWatchlist(prev => prev.filter(item => item.id !== id));
         await supabase.from('saved_properties').delete().eq('id', id);

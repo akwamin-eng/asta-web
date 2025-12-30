@@ -16,7 +16,14 @@ import {
   Phone
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import IntelligenceCard from "./dossier/modules/IntelligenceCard"; // FIXED IMPORT PATH
+import { supabase } from '../lib/supabase';
+
+// --- IMPORTS FOR GATEKEEPER & TOASTS ---
+import AuthOverlay from './AuthOverlay';
+import Toast from './ui/Toast';
+import FieldReportModal from "./dossier/FieldReportModal";
+
+import IntelligenceCard from "./dossier/modules/IntelligenceCard";
 import SaveButton from "./SaveButton";
 import TrustScorecard from "./intel/TrustScorecard"; 
 import MarketPulse from "./intel/MarketPulse";
@@ -25,7 +32,7 @@ import TrueCostCalculator from "./intel/TrueCostCalculator";
 interface PropertyInspectorProps {
   property: any;
   onClose: () => void;
-  onVerify?: () => void;
+  onVerify?: () => void; // Kept for backward compat, but we'll use internal state mostly
 }
 
 // --- INTERNAL COMPONENT: INTELLIGENCE TOOLTIP ---
@@ -37,7 +44,6 @@ const IntelTooltip = ({ children, title, desc }: { children: React.ReactNode; ti
         <span className="font-bold text-emerald-400 uppercase tracking-wider">{title}</span>
         <span className="text-gray-400 leading-tight">{desc}</span>
       </div>
-      {/* Little triangle pointer */}
       <div className="w-2 h-2 bg-white/20 rotate-45 absolute left-8 -bottom-1 transform translate-y-1/2"></div>
     </div>
   </div>
@@ -55,12 +61,34 @@ export default function PropertyInspector({
   // State for Image Carousel Navigation
   const [photoIndex, setPhotoIndex] = useState(0);
 
+  // --- AUTH & GATEKEEPER STATE ---
+  const [user, setUser] = useState<any>(null);
+  const [showAuth, setShowAuth] = useState(false);
+  
+  // --- VERIFICATION & TOAST STATE ---
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
   // --- CONTACT FORM STATE ---
   const [isContactOpen, setContactOpen] = useState(false);
   const [inquirer, setInquirer] = useState({ name: "", phone: "", message: "" });
 
   // Alias 'property' to 'data'
   const data = property;
+
+  // 1. CHECK AUTH ON MOUNT
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setUser(data.user));
+  }, []);
+
+  // 2. GATEKEEPER FUNCTION (Generic)
+  const handleGatekeptAction = (action: () => void) => {
+    if (user) {
+      action();
+    } else {
+      setShowAuth(true);
+    }
+  };
 
   // Safety: If no data, don't render
   if (!data) return null;
@@ -106,7 +134,6 @@ export default function PropertyInspector({
   // --- ACTIONS ---
   
   const handleOpenContact = () => {
-    // Reset form with a smart default message
     setInquirer({
       name: "",
       phone: "",
@@ -125,14 +152,10 @@ export default function PropertyInspector({
     const contact = data.phone || data.contact || data.metadata?.phone || "233540000000"; 
     
     if (contact) {
-      // Clean the number
       const number = contact.toString().replace(/[^0-9]/g, '');
       const encodedMsg = encodeURIComponent(fullMessage);
-      
-      // Open WhatsApp
       window.open(`https://wa.me/${number}?text=${encodedMsg}`, '_blank');
     } else {
-      // 3. Fallback to Secure Inbox Alert
       alert(`ASTA SECURE INBOX\n\nMessage queued for encryption.\n\nFrom: ${inquirer.name}\nTo: Owner of "${data.title}"`);
     }
     
@@ -157,11 +180,38 @@ export default function PropertyInspector({
       
   const numericPrice = currency === "GHS" ? data.price : (data.price / exchangeRate);
 
-  // Reusable hover effect class for widgets
   const widgetHoverEffect = "transition-transform duration-300 hover:scale-[1.02] hover:shadow-[0_4px_20px_rgba(0,0,0,0.5)]";
 
   return (
     <>
+      {/* AUTH OVERLAY (GATEKEEPER) */}
+      <AnimatePresence>
+        {showAuth && <AuthOverlay onClose={() => setShowAuth(false)} />}
+      </AnimatePresence>
+
+      {/* VERIFY MODAL (INTERNAL) */}
+      <AnimatePresence>
+        {showVerifyModal && (
+          <FieldReportModal 
+            propertyId={data.id} 
+            propertyName={data.title}
+            onClose={() => setShowVerifyModal(false)}
+            onSuccess={() => setToastMessage("Field Report Transmitted: Reputation Increased")}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* TOAST NOTIFICATION */}
+      <AnimatePresence>
+        {toastMessage && (
+          <Toast 
+            message={toastMessage} 
+            onClose={() => setToastMessage(null)} 
+            type="success"
+          />
+        )}
+      </AnimatePresence>
+
       {/* CINEMATIC OVERLAY */}
       <AnimatePresence>
         {isImageExpanded && (
@@ -224,11 +274,29 @@ export default function PropertyInspector({
             <p className="text-gray-400 text-xs uppercase font-bold mb-1 flex items-center gap-1 group-hover:text-emerald-400">Price ({currency}) <ChevronDown size={10} /></p>
             <p className="text-2xl font-mono text-emerald-400">{displayPrice}</p>
           </div>
-          <SaveButton propertyId={data.id} className="h-10 px-4" />
           
-          {onVerify && (
-            <button onClick={onVerify} className="flex items-center justify-center w-12 h-10 rounded-lg bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-500/30 text-emerald-500" title="Verify Asset"><ShieldCheck size={20} /></button>
-          )}
+          {/* GATED: SAVE/WATCH BUTTON */}
+          <div 
+             className="contents" // Ensure wrapper doesn't break Flex layout
+             onClickCapture={(e) => {
+               if (!user) {
+                 e.stopPropagation();
+                 e.preventDefault();
+                 setShowAuth(true);
+               }
+             }}
+          >
+             <SaveButton propertyId={data.id} className="h-10 px-4" />
+          </div>
+          
+          {/* GATED: VERIFY BUTTON */}
+          <button 
+            onClick={() => handleGatekeptAction(() => setShowVerifyModal(true))} 
+            className="flex items-center justify-center w-12 h-10 rounded-lg bg-emerald-900/20 hover:bg-emerald-900/40 border border-emerald-500/30 text-emerald-500 transition-colors" 
+            title="Verify Asset"
+          >
+            <ShieldCheck size={20} />
+          </button>
           
           <button 
             onClick={handleOpenContact}
@@ -242,7 +310,7 @@ export default function PropertyInspector({
         {/* MAIN CONTENT STACK */}
         <div className="p-4 md:p-6 space-y-6">
           
-          {/* CONTACT FORM OVERLAY (Shows when Contact clicked) */}
+          {/* CONTACT FORM OVERLAY */}
           <AnimatePresence>
             {isContactOpen && (
               <motion.div
