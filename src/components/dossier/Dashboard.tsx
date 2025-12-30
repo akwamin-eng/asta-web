@@ -23,7 +23,6 @@ export default function Dashboard() {
   ];
 
   // LOGIC UPDATE: Use Raw Database Count
-  // We no longer subtract a "Seed Offset". The DB is the single source of truth.
   const totalAssets = stats?.activeListings || 0;
   const estimatedAvgSale = stats?.avgSale || 0;
 
@@ -106,7 +105,7 @@ export default function Dashboard() {
           />
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
+            <div className="lg:col-span-2 flex flex-col gap-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <MetricCard 
                   title="Price Trend (6M)" 
@@ -129,17 +128,20 @@ export default function Dashboard() {
                 </MetricCard>
               </div>
 
-              <div className="bg-white/5 border border-white/10 rounded-xl p-5">
-                 <div className="flex justify-between items-center mb-4">
+              {/* LIVE MARKET SIGNALS (Expanded to fill height) */}
+              <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex-1 min-h-[300px] flex flex-col">
+                 <div className="flex justify-between items-center mb-4 shrink-0">
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
-                      <Newspaper size={14} className="text-purple-500" /> Live Intelligence Feed
+                      <Newspaper size={14} className="text-purple-500" /> Live Market Signals
                     </h3>
                     {intelLoading && <Activity size={12} className="animate-spin text-gray-500" />}
                  </div>
                  
-                 <div className="space-y-4">
+                 <div className="space-y-4 overflow-y-auto custom-scrollbar flex-1 pr-2">
                     {intel.length === 0 && !intelLoading ? (
-                       <p className="text-xs text-gray-500 italic">No recent intelligence reports intercepted.</p>
+                       <div className="h-full flex items-center justify-center text-gray-500 italic text-xs">
+                          No active signals detected.
+                       </div>
                     ) : (
                        intel.map((item) => (
                           <div key={item.id} className="flex gap-4 group cursor-default">
@@ -148,7 +150,7 @@ export default function Dashboard() {
                                 <span className="text-[9px] font-bold text-gray-600 uppercase">{new Date(item.date).toLocaleString('default', { month: 'short' })}</span>
                              </div>
                              <div className="flex-1 pb-3 border-b border-white/5 group-last:border-0 overflow-hidden">
-                                <h4 className="text-sm font-medium text-gray-200 truncate pr-4">
+                                <h4 className="text-sm font-medium text-gray-200 truncate pr-4 group-hover:text-emerald-400 transition-colors">
                                    {item.title}
                                 </h4>
                                 <p className="text-[11px] text-gray-500 mt-1 line-clamp-2">
@@ -167,7 +169,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="space-y-6">
+            <div className="space-y-6 flex flex-col">
               <IntelligenceClocks />
               <MetricCard 
                  title="Detected Anomalies" 
