@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, ChevronRight, Fingerprint, Activity, Radio, MapPin } from 'lucide-react';
+import { Shield, ChevronRight, Fingerprint, Activity, Radio, MapPin, Check } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { SCOUT_CLASSES } from '../../lib/reputation';
+import { getAvatarUrl } from '../../lib/avatar';
 
 interface OnboardingProps {
   currentName: string;
@@ -9,11 +11,12 @@ interface OnboardingProps {
 }
 
 export default function OnboardingModule({ currentName, onComplete }: OnboardingProps) {
-  const [step, setStep] = useState<'signal' | 'identity' | 'briefing'>('signal');
+  const [step, setStep] = useState<'signal' | 'identity' | 'classification' | 'briefing'>('signal');
   const [codename, setCodename] = useState('');
+  const [selectedClass, setSelectedClass] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  // STEP 1: SIGNAL INTERCEPT (Auto-advance after 3s)
+  // AUTO-ADVANCE SIGNAL
   React.useEffect(() => {
     if (step === 'signal') {
       const timer = setTimeout(() => setStep('identity'), 3500);
@@ -21,17 +24,27 @@ export default function OnboardingModule({ currentName, onComplete }: Onboarding
     }
   }, [step]);
 
-  // HANDLE NAME SAVE
-  const handleIdentityConfirm = async () => {
+  // HANDLERS
+  const handleIdentityNext = () => {
     if (!codename.trim()) return;
+    setStep('classification');
+  };
+
+  const handleFinalize = async () => {
+    if (!selectedClass || !codename) return;
     setIsSaving(true);
     
-    // Update Supabase
+    // Save generated avatar URL explicitly so it persists
+    const generatedAvatar = getAvatarUrl(codename, 'bottts');
+
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       await supabase.from('profiles').update({ 
         full_name: codename,
-        rank_title: 'Field Agent' // Give them a starter rank
+        scout_segment: selectedClass,
+        rank_title: 'Observer',
+        reputation_score: 10,
+        avatar_url: generatedAvatar // Save the robot!
       }).eq('id', user.id);
     }
 
@@ -41,10 +54,9 @@ export default function OnboardingModule({ currentName, onComplete }: Onboarding
 
   return (
     <div className="absolute inset-0 z-[200] bg-black/95 backdrop-blur-xl flex flex-col items-center justify-center text-white font-sans p-6">
-      
       <AnimatePresence mode="wait">
         
-        {/* --- STAGE 1: SIGNAL INTERCEPT --- */}
+        {/* STAGE 1: SIGNAL */}
         {step === 'signal' && (
           <motion.div 
             key="signal"
@@ -57,26 +69,35 @@ export default function OnboardingModule({ currentName, onComplete }: Onboarding
             </div>
             <h2 className="text-2xl font-bold tracking-tighter uppercase text-emerald-500">Incoming Transmission</h2>
             <div className="font-mono text-xs text-emerald-500/70 space-y-1">
-               <p>ENCRYPTION: AES-256... <span className="text-emerald-400">VERIFIED</span></p>
-               <p>SOURCE: CENTRAL COMMAND... <span className="text-emerald-400">CONNECTED</span></p>
-               <p>HANDSHAKE PROTOCOL... <span className="text-emerald-400">COMPLETE</span></p>
+               <p>ENCRYPTION... <span className="text-emerald-400">VERIFIED</span></p>
+               <p>SOURCE... <span className="text-emerald-400">CONNECTED</span></p>
             </div>
           </motion.div>
         )}
 
-        {/* --- STAGE 2: IDENTITY ASSIGNMENT --- */}
+        {/* STAGE 2: IDENTITY (WITH AVATAR PREVIEW) */}
         {step === 'identity' && (
           <motion.div 
              key="identity"
-             initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+             initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
              className="max-w-md w-full bg-[#111] border border-white/10 p-8 rounded-2xl shadow-2xl relative overflow-hidden"
           >
              <div className="absolute top-0 left-0 w-full h-1 bg-emerald-500" />
-             <Fingerprint size={32} className="text-emerald-500 mb-4" />
              
-             <h2 className="text-xl font-bold text-white mb-2">Identify Yourself</h2>
-             <p className="text-sm text-gray-400 mb-6 leading-relaxed">
-               The network has detected a new signal signature. To proceed with dossier creation, please confirm your field codename.
+             {/* DYNAMIC AVATAR PREVIEW */}
+             <div className="flex justify-center mb-6">
+               <div className="w-24 h-24 rounded-full border-2 border-emerald-500/50 bg-black overflow-hidden shadow-[0_0_20px_rgba(16,185,129,0.2)] transition-all">
+                 <img 
+                   src={getAvatarUrl(codename || 'unknown', 'bottts')} 
+                   alt="Avatar Preview" 
+                   className="w-full h-full object-cover"
+                 />
+               </div>
+             </div>
+             
+             <h2 className="text-xl font-bold text-white text-center mb-2">Identify Yourself</h2>
+             <p className="text-sm text-gray-400 text-center mb-6">
+               Enter your codename to generate your digital signature.
              </p>
 
              <div className="space-y-4">
@@ -85,82 +106,100 @@ export default function OnboardingModule({ currentName, onComplete }: Onboarding
                    type="text" 
                    value={codename}
                    onChange={(e) => setCodename(e.target.value)}
-                   placeholder="Enter Codename (e.g. Agent Wolf)"
-                   className="w-full bg-black border border-white/20 rounded-lg py-3 px-4 text-emerald-400 font-mono focus:outline-none focus:border-emerald-500 transition-colors uppercase tracking-widest"
+                   placeholder="e.g. Agent Wolf"
+                   className="w-full bg-black border border-white/20 rounded-lg py-3 px-4 text-emerald-400 font-mono focus:outline-none focus:border-emerald-500 transition-colors uppercase tracking-widest text-center"
                    autoFocus
                  />
-                 <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-gray-600 font-mono">
-                   REQUIRED
-                 </div>
                </div>
 
                <button 
-                 onClick={handleIdentityConfirm}
-                 disabled={!codename || isSaving}
-                 className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                 onClick={handleIdentityNext}
+                 disabled={!codename}
+                 className="w-full bg-white text-black hover:bg-gray-200 font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50"
                >
-                 {isSaving ? 'Encrypting Identity...' : <>Confirm Protocol <ChevronRight size={16} /></>}
+                 Next Step <ChevronRight size={16} />
                </button>
              </div>
           </motion.div>
         )}
 
-        {/* --- STAGE 3: BRIEFING --- */}
+        {/* STAGE 3: CLASSIFICATION */}
+        {step === 'classification' && (
+          <motion.div 
+             key="classification"
+             initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
+             className="max-w-xl w-full bg-[#111] border border-white/10 p-8 rounded-2xl shadow-2xl relative overflow-hidden flex flex-col max-h-[80vh]"
+          >
+             <div className="absolute top-0 left-0 w-1/2 h-1 bg-emerald-500" />
+             <div className="mb-6 text-center">
+               <h2 className="text-xl font-bold text-white mb-2">Select Protocol</h2>
+               <p className="text-sm text-gray-400">Assign your operating profile for the mission.</p>
+             </div>
+
+             <div className="grid gap-3 overflow-y-auto custom-scrollbar pr-2 mb-6">
+                {SCOUT_CLASSES.map((c) => {
+                  const Icon = c.icon;
+                  const isSelected = selectedClass === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => setSelectedClass(c.id)}
+                      className={`relative flex items-center gap-4 p-4 rounded-xl border text-left transition-all group ${
+                        isSelected 
+                          ? "bg-emerald-900/20 border-emerald-500 ring-1 ring-emerald-500/50" 
+                          : "bg-white/5 border-white/10 hover:border-white/30 hover:bg-white/10"
+                      }`}
+                    >
+                      <div className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-colors ${isSelected ? 'bg-emerald-500 text-black' : 'bg-black text-gray-400 group-hover:text-white'}`}>
+                        <Icon size={18} />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className={`text-sm font-bold ${isSelected ? 'text-white' : 'text-gray-300'}`}>{c.label}</h3>
+                        <p className={`text-[10px] leading-tight mt-0.5 ${isSelected ? 'text-emerald-200/70' : 'text-gray-500'}`}>{c.description}</p>
+                      </div>
+                      {isSelected && <div className="text-emerald-500"><Check size={18} /></div>}
+                    </button>
+                  );
+                })}
+             </div>
+
+             <button 
+               onClick={handleFinalize}
+               disabled={!selectedClass || isSaving}
+               className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50 mt-auto shadow-lg"
+             >
+               {isSaving ? 'Establishing Uplink...' : <>Confirm Classification <ChevronRight size={16} /></>}
+             </button>
+          </motion.div>
+        )}
+
+        {/* STAGE 4: BRIEFING */}
         {step === 'briefing' && (
           <motion.div 
              key="briefing"
              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-             className="max-w-4xl w-full grid grid-cols-1 md:grid-cols-3 gap-6"
+             className="max-w-4xl w-full text-center"
           >
-             <div className="col-span-full text-center mb-8">
-               <h2 className="text-2xl font-bold text-white mb-2">Welcome, {codename}</h2>
-               <p className="text-gray-400">Your Unified Command Center is ready. Here are your tools:</p>
+             {/* Large Avatar Reveal */}
+             <div className="w-32 h-32 mx-auto rounded-full border-4 border-emerald-500 shadow-[0_0_40px_rgba(16,185,129,0.4)] overflow-hidden mb-6 bg-black">
+                 <img 
+                   src={getAvatarUrl(codename, 'bottts')} 
+                   alt="Final Avatar" 
+                   className="w-full h-full object-cover"
+                 />
              </div>
+             
+             <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">Welcome, {codename}</h2>
+             <p className="text-gray-400 mb-8">Your Unified Command Center is ready.</p>
 
-             {/* Card 1 */}
-             <div className="bg-[#111] border border-white/10 p-6 rounded-xl hover:border-emerald-500/50 transition-colors group">
-                <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center mb-4 group-hover:bg-blue-500 text-blue-400 group-hover:text-white transition-all">
-                  <MapPin size={20} />
-                </div>
-                <h3 className="font-bold text-white mb-2">Live Map</h3>
-                <p className="text-xs text-gray-500 leading-relaxed">
-                  Scout real-time assets. Click <span className="text-white">"Watch"</span> to track yields, or <span className="text-white">"Verify"</span> to submit field reports.
-                </p>
-             </div>
-
-             {/* Card 2 */}
-             <div className="bg-[#111] border border-white/10 p-6 rounded-xl hover:border-emerald-500/50 transition-colors group">
-                <div className="w-10 h-10 bg-amber-500/20 rounded-lg flex items-center justify-center mb-4 group-hover:bg-amber-500 text-amber-400 group-hover:text-white transition-all">
-                  <Activity size={20} />
-                </div>
-                <h3 className="font-bold text-white mb-2">Hunter Config</h3>
-                <p className="text-xs text-gray-500 leading-relaxed">
-                  Set your <span className="text-white">Buy Box</span> (Budget & Zones). Our algorithms will auto-scan for deals matching your criteria.
-                </p>
-             </div>
-
-             {/* Card 3 */}
-             <div className="bg-[#111] border border-white/10 p-6 rounded-xl hover:border-emerald-500/50 transition-colors group">
-                <div className="w-10 h-10 bg-emerald-500/20 rounded-lg flex items-center justify-center mb-4 group-hover:bg-emerald-500 text-emerald-400 group-hover:text-white transition-all">
-                  <Shield size={20} />
-                </div>
-                <h3 className="font-bold text-white mb-2">Reputation</h3>
-                <p className="text-xs text-gray-500 leading-relaxed">
-                  Earn points by verifying data. Higher reputation unlocks <span className="text-white">Off-Market Deals</span> and <span className="text-white">Scout Tiers</span>.
-                </p>
-             </div>
-
-             <div className="col-span-full flex justify-center mt-8">
-               <button 
-                 onClick={onComplete}
-                 className="bg-white text-black font-bold px-8 py-3 rounded-full hover:bg-emerald-400 hover:scale-105 transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)]"
-               >
-                 Launch Command Center
-               </button>
-             </div>
+             <button 
+               onClick={onComplete}
+               className="bg-white text-black font-bold px-10 py-4 rounded-full hover:bg-emerald-400 hover:scale-105 transition-all shadow-[0_0_30px_rgba(16,185,129,0.3)] text-sm uppercase tracking-widest"
+             >
+               Launch Command Center
+             </button>
           </motion.div>
         )}
-
       </AnimatePresence>
     </div>
   );
