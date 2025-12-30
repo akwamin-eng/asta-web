@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { Activity, Radio, FileText, Newspaper, MapPin, ChevronDown } from 'lucide-react';
-import { useMarketStats } from '../hooks/useMarketStats';
-import { useMarketIntel } from '../hooks/useMarketIntel';
-import { GHANA_REGIONS, type RegionName } from '../lib/regions'; // FIXED IMPORT
+import { useMarketStats } from '../../hooks/useMarketStats';
+import { useMarketIntel } from '../../hooks/useMarketIntel';
+import { GHANA_REGIONS, type RegionName } from '../../lib/regions';
 
 import PlatformStats from './modules/dashboard/PlatformStats';
 import MetricCard from './modules/dashboard/MetricCard';
@@ -12,12 +12,11 @@ import NeighborhoodLeaderboard from './modules/dashboard/NeighborhoodLeaderboard
 import AnomalyFeed from './modules/dashboard/AnomalyFeed';
 import IntelligenceClocks from './modules/IntelligenceClocks';
 
-// CONSTANTS
 const SEED_OFFSET = 700; 
 
 export default function Dashboard() {
   const [selectedRegion, setSelectedRegion] = useState<RegionName>("Greater Accra");
-  const { stats, loading: statsLoading } = useMarketStats(selectedRegion); // Filter by Region
+  const { stats, loading: statsLoading } = useMarketStats(selectedRegion);
   const { intel, loading: intelLoading } = useMarketIntel();
 
   const trustData = [
@@ -25,13 +24,11 @@ export default function Dashboard() {
     { name: 'Unverified', value: 35, color: '#ef4444' },
   ];
 
-  // Logic: Net Assets (Only offset seed data for Accra)
   const totalRaw = stats?.activeListings || 0;
   const netAssets = selectedRegion === "Greater Accra" 
     ? Math.max(0, totalRaw - SEED_OFFSET) 
     : totalRaw;
 
-  // Logic: Use calculated Sale avg or fallback
   const estimatedAvgSale = stats?.avgSale || 0;
 
   const chartData = [
@@ -56,7 +53,7 @@ export default function Dashboard() {
   return (
     <div className="h-full flex flex-col p-4 md:p-6 space-y-6 overflow-y-auto custom-scrollbar">
       
-      {/* HEADER WITH REGION SELECTOR */}
+      {/* HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-xl font-bold text-white tracking-tight">Market Matrix</h2>
@@ -90,7 +87,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* EMPTY STATE FOR REGIONS WITH NO DATA */}
+      {/* EMPTY STATE */}
       {stats?.activeListings === 0 && !statsLoading ? (
         <div className="flex-1 flex flex-col items-center justify-center border border-white/10 border-dashed rounded-xl p-12 bg-white/5">
           <MapPin size={48} className="text-gray-600 mb-4" />
@@ -104,7 +101,6 @@ export default function Dashboard() {
         </div>
       ) : (
         <>
-          {/* 1. HIGH LEVEL KPI ROW */}
           <PlatformStats 
             totalAssets={netAssets}
             avgRent={stats?.avgRent || 0} 
@@ -114,8 +110,6 @@ export default function Dashboard() {
           />
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* LEFT COLUMN (Charts) */}
             <div className="lg:col-span-2 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <MetricCard 
@@ -139,7 +133,6 @@ export default function Dashboard() {
                 </MetricCard>
               </div>
 
-              {/* INTELLIGENCE FEED */}
               <div className="bg-white/5 border border-white/10 rounded-xl p-5">
                  <div className="flex justify-between items-center mb-4">
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
@@ -178,10 +171,8 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* RIGHT COLUMN (Lists & Anomalies) */}
             <div className="space-y-6">
               <IntelligenceClocks />
-              
               <MetricCard 
                  title="Detected Anomalies" 
                  icon={<Radio size={14} className="text-red-500 animate-pulse" />}
@@ -191,7 +182,6 @@ export default function Dashboard() {
               >
                  <AnomalyFeed data={anomalies} />
               </MetricCard>
-
               <MetricCard 
                  title="Top Zones (Vol)" 
                  icon={<FileText size={14} className="text-amber-500" />}

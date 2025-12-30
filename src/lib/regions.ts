@@ -20,6 +20,7 @@ export const GHANA_REGIONS = [
 export type RegionName = typeof GHANA_REGIONS[number];
 
 const NEIGHBORHOOD_MAP: Record<string, RegionName> = {
+  // Greater Accra
   "Cantonments": "Greater Accra",
   "Airport Residential": "Greater Accra",
   "Labone": "Greater Accra",
@@ -38,9 +39,15 @@ const NEIGHBORHOOD_MAP: Record<string, RegionName> = {
   "Lapaz": "Greater Accra",
   "Weija": "Greater Accra",
   "McCarthy Hill": "Greater Accra",
+  
+  // Central
   "Kasoa": "Central",
+  
+  // Ashanti
   "Kumasi": "Ashanti",
   "Ahodwo": "Ashanti",
+  
+  // Western
   "Takoradi": "Western",
   "Tarkwa": "Western"
 };

@@ -23,7 +23,6 @@ const StatBox = ({ label, value, subtext, icon, trend, tooltip, warning }: StatP
           {warning && <AlertTriangle size={10} className="text-amber-500 animate-pulse" />}
         </p>
         
-        {/* Tooltip */}
         {tooltip && (
           <div className="relative group/tooltip ml-auto">
             <Info size={10} className="text-gray-600 cursor-help hover:text-emerald-500" />
@@ -62,7 +61,6 @@ export default function PlatformStats({ totalAssets, avgRent, avgSale, verifiedC
     mass: avgRent * 0.08  // ~1.6k (Madina/Kasoa)
   };
 
-  // Rich Tooltip for Rent with Volatility Warning
   const RentTooltip = (
     <div className="space-y-3">
       <div className="pb-2 border-b border-white/10">
@@ -106,7 +104,7 @@ export default function PlatformStats({ totalAssets, avgRent, avgSale, verifiedC
         subtext="Monthly Mean" 
         icon={<TrendingUp size={18} />}
         tooltip={RentTooltip}
-        warning={true} // Triggers the visual warning
+        warning={true}
       />
       <StatBox 
         label="Est. Sale" 

@@ -4,7 +4,7 @@ import { X, Activity, Layout, Mail, Loader2, Map as MapIcon, ChevronLeft } from 
 import IdentityModule from "./IdentityModule";
 import SmartWatchlist from "./SmartWatchlist";
 import HunterPreferences from "./HunterPreferences";
-import Dashboard from "../Dashboard";
+import Dashboard from "./Dashboard"; // FIXED: Now imports from same folder
 import SecureInbox from "./SecureInbox";
 import OnboardingModule from "./OnboardingModule";
 import AssetClaimModal from "./AssetClaimModal"; 

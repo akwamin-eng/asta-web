@@ -16,7 +16,7 @@ import {
   Phone
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import IntelligenceCard from "./modules/IntelligenceCard";
+import IntelligenceCard from "./dossier/modules/IntelligenceCard"; // FIXED IMPORT PATH
 import SaveButton from "./SaveButton";
 import TrustScorecard from "./intel/TrustScorecard"; 
 import MarketPulse from "./intel/MarketPulse";

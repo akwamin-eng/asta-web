@@ -1,7 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import AstaMap from './components/AstaMap';
-import Dashboard from './components/Dashboard';
+import Dashboard from './components/dossier/Dashboard'; // FIXED PATH
 
 function App() {
   return (
