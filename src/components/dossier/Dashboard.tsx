@@ -12,8 +12,6 @@ import NeighborhoodLeaderboard from './modules/dashboard/NeighborhoodLeaderboard
 import AnomalyFeed from './modules/dashboard/AnomalyFeed';
 import IntelligenceClocks from './modules/IntelligenceClocks';
 
-const SEED_OFFSET = 700; 
-
 export default function Dashboard() {
   const [selectedRegion, setSelectedRegion] = useState<RegionName>("Greater Accra");
   const { stats, loading: statsLoading } = useMarketStats(selectedRegion);
@@ -24,11 +22,9 @@ export default function Dashboard() {
     { name: 'Unverified', value: 35, color: '#ef4444' },
   ];
 
-  const totalRaw = stats?.activeListings || 0;
-  const netAssets = selectedRegion === "Greater Accra" 
-    ? Math.max(0, totalRaw - SEED_OFFSET) 
-    : totalRaw;
-
+  // LOGIC UPDATE: Use Raw Database Count
+  // We no longer subtract a "Seed Offset". The DB is the single source of truth.
+  const totalAssets = stats?.activeListings || 0;
   const estimatedAvgSale = stats?.avgSale || 0;
 
   const chartData = [
@@ -39,7 +35,7 @@ export default function Dashboard() {
   ];
 
   const tooltips = {
-    assets: `Net new properties tracked in ${selectedRegion}.`,
+    assets: `Total active properties tracked in ${selectedRegion}.`,
     sale: "Estimated median sales price based on current market listings.",
     verified: "Assets physically inspected by Asta Scouts (Trust Tier A/B).",
     seekers: `Active Hunter Protocols scanning ${selectedRegion} right now.`
@@ -102,10 +98,10 @@ export default function Dashboard() {
       ) : (
         <>
           <PlatformStats 
-            totalAssets={netAssets}
+            totalAssets={totalAssets}
             avgRent={stats?.avgRent || 0} 
             avgSale={estimatedAvgSale}
-            verifiedCount={Math.floor(netAssets * 0.65)} 
+            verifiedCount={Math.floor(totalAssets * 0.65)} 
             tooltips={tooltips}
           />
 

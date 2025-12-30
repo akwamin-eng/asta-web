@@ -1,4 +1,4 @@
-// import { Database } from '../types/supabase'; <--- REMOVED BROKEN IMPORT
+import { supabase } from './supabase';
 
 // Define loose types locally to avoid dependency errors
 type Property = any; 
@@ -101,4 +101,35 @@ export function calculateTrustScore(property: Property, owner?: Profile): TrustS
   }
 
   return { score, grade, label, color, breakdown };
+}
+
+// --- SECURE INBOX WIRING ---
+
+export async function sendSecureMessage(
+  recipientId: string, 
+  content: string, 
+  senderId?: string | null
+) {
+  try {
+    // If no senderId is provided (anonymous user), we set it to null
+    // and flag it as a system alert so the UI treats it differently.
+    const { data, error } = await supabase
+      .from('messages')
+      .insert([
+        {
+          recipient_id: recipientId,
+          sender_id: senderId || null, 
+          content: content,
+          is_system_alert: !senderId, // True if anonymous
+          created_at: new Date().toISOString(),
+        }
+      ])
+      .select();
+
+    if (error) throw error;
+    return { success: true, data };
+  } catch (error) {
+    console.error("Secure Transmission Failed:", error);
+    return { success: false, error };
+  }
 }
