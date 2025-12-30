@@ -14,19 +14,25 @@ import {
   Send,
   User,
   Phone,
-  Share2
+  Share2,
+  Sparkles,
+  Loader2
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from '../lib/supabase';
 import AuthOverlay from './AuthOverlay';
 import Toast from './ui/Toast';
 import FieldReportModal from "./dossier/FieldReportModal";
+import HypeManModal from "./agents/HypeManModal";
 
 import IntelligenceCard from "./dossier/modules/IntelligenceCard";
 import SaveButton from "./SaveButton";
 import TrustScorecard from "./intel/TrustScorecard"; 
 import MarketPulse from "./intel/MarketPulse";
 import TrueCostCalculator from "./intel/TrueCostCalculator";
+
+// FIX: Corrected import path from ../../ to ../
+import { useLeadRouter } from '../hooks/useLeadRouter';
 
 interface PropertyInspectorProps {
   property: any;
@@ -62,13 +68,17 @@ export default function PropertyInspector({
   const [user, setUser] = useState<any>(null);
   const [showAuth, setShowAuth] = useState(false);
   
-  // --- VERIFY & TOAST STATE ---
+  // --- AGENTS & MODALS STATE ---
   const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [showHypeMan, setShowHypeMan] = useState(false); 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // --- CONTACT FORM STATE ---
   const [isContactOpen, setContactOpen] = useState(false);
   const [inquirer, setInquirer] = useState({ name: "", phone: "", message: "" });
+  
+  // NEW: Lead Router Hook
+  const { createLeadAndRedirect, loading: routingLead } = useLeadRouter();
 
   const data = property;
 
@@ -124,19 +134,15 @@ export default function PropertyInspector({
     setContactOpen(true);
   };
 
-  const handleSendInquiry = (e: React.FormEvent) => {
+  const handleSendInquiry = async (e: React.FormEvent) => {
     e.preventDefault();
-    const fullMessage = `*New Lead via Asta*\n\n*Property:* ${data.title}\n*Price:* ${displayPrice}\n\n*Inquirer:* ${inquirer.name}\n*Phone:* ${inquirer.phone}\n\n*Message:* ${inquirer.message}`;
-    const contact = data.phone || data.contact || data.metadata?.phone || "233540000000"; 
     
-    if (contact) {
-      const number = contact.toString().replace(/[^0-9]/g, '');
-      const encodedMsg = encodeURIComponent(fullMessage);
-      window.open(`https://wa.me/${number}?text=${encodedMsg}`, '_blank');
-    } else {
-      alert(`ASTA SECURE INBOX\n\nMessage queued for encryption.\n\nFrom: ${inquirer.name}\nTo: Owner of "${data.title}"`);
+    const result = await createLeadAndRedirect(data, inquirer, user);
+    
+    if (result.success) {
+      setContactOpen(false);
+      setToastMessage("Secure Link Established: Redirecting to WhatsApp...");
     }
-    setContactOpen(false);
   };
 
   const getSafeFeatures = () => {
@@ -163,6 +169,7 @@ export default function PropertyInspector({
     <>
       <AnimatePresence>{showAuth && <AuthOverlay onClose={() => setShowAuth(false)} />}</AnimatePresence>
       <AnimatePresence>{toastMessage && <Toast message={toastMessage} onClose={() => setToastMessage(null)} type="success" />}</AnimatePresence>
+      
       <AnimatePresence>
         {showVerifyModal && (
           <FieldReportModal 
@@ -172,9 +179,14 @@ export default function PropertyInspector({
             onSuccess={() => setToastMessage("Field Report Transmitted: Reputation Increased")}
           />
         )}
+        {showHypeMan && (
+          <HypeManModal 
+            property={data} 
+            onClose={() => setShowHypeMan(false)} 
+          />
+        )}
       </AnimatePresence>
 
-      {/* --- CINEMATIC FULLSCREEN GALLERY --- */}
       <AnimatePresence>
         {isImageExpanded && (
           <motion.div
@@ -184,7 +196,6 @@ export default function PropertyInspector({
           >
             <button className="absolute top-6 right-6 text-white bg-black/50 p-3 rounded-full z-50 hover:bg-white hover:text-black transition-colors"><X size={24} /></button>
             
-            {/* Mobile Swipe-friendly layout could be added here, currently buttons */}
             {galleryImages.length > 1 && (
               <>
                 <button onClick={prevPhoto} className="absolute left-4 top-1/2 -translate-y-1/2 text-white bg-black/50 p-4 rounded-full z-50"><ChevronLeft size={32} /></button>
@@ -207,7 +218,6 @@ export default function PropertyInspector({
         )}
       </AnimatePresence>
 
-      {/* --- MAIN INSPECTOR PANEL --- */}
       <motion.div
         key="property-inspector"
         initial={{ x: "100%" }}
@@ -216,21 +226,29 @@ export default function PropertyInspector({
         transition={{ type: "tween", ease: "easeOut", duration: 0.3 }}
         className="fixed inset-0 md:left-auto md:w-[450px] bg-[#0A0A0A] border-l border-white/10 shadow-2xl z-[60] flex flex-col"
       >
-        {/* 1. SCROLLABLE CONTENT AREA */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar pb-32"> {/* Increased bottom padding for mobile bar */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar pb-32"> 
           
-          {/* HEADER IMAGE */}
           <div className="relative h-56 md:h-64 bg-gray-900 group cursor-zoom-in" onClick={() => { setPhotoIndex(0); setIsImageExpanded(true); }}>
             <img src={data.cover_image_url || galleryImages[0]} alt={data.title} className="w-full h-full object-cover opacity-90" />
             <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0A] via-transparent to-transparent" />
             
-            {/* Top Bar Actions */}
             <div className="absolute top-0 left-0 w-full p-4 flex justify-between items-start z-10">
                <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="bg-black/40 hover:bg-black/80 text-white p-2.5 rounded-full backdrop-blur-md border border-white/10">
                  <ArrowLeft size={20} />
                </button>
-               <div className="bg-black/50 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/20 text-white text-[10px] font-bold uppercase tracking-wider flex items-center gap-2">
-                 <Maximize2 size={12} /> {photoIndex + 1}/{galleryImages.length}
+               
+               <div className="flex gap-2">
+                 <button 
+                   onClick={(e) => { e.stopPropagation(); setShowHypeMan(true); }}
+                   className="bg-black/40 hover:bg-purple-500/80 text-white p-2.5 rounded-full backdrop-blur-md border border-white/10 transition-colors"
+                   title="Generate Marketing"
+                 >
+                   <Sparkles size={18} />
+                 </button>
+
+                 <div className="bg-black/50 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/20 text-white text-[10px] font-bold uppercase tracking-wider flex items-center gap-2">
+                   <Maximize2 size={12} /> {photoIndex + 1}/{galleryImages.length}
+                 </div>
                </div>
             </div>
 
@@ -242,9 +260,7 @@ export default function PropertyInspector({
             </div>
           </div>
 
-          {/* QUICK TOOLBAR (Desktop Style - Hidden on Mobile logic if needed, but we keep it slim) */}
           <div className="grid grid-cols-[1fr_auto_auto] gap-3 p-4 border-b border-white/10 bg-[#0A0A0A] sticky top-0 z-20">
-            {/* Price Toggle */}
             <div 
               className="flex flex-col justify-center cursor-pointer active:scale-95 transition-transform" 
               onClick={() => setCurrency((c) => (c === "GHS" ? "USD" : "GHS"))}
@@ -257,7 +273,6 @@ export default function PropertyInspector({
               </div>
             </div>
             
-            {/* Action Icons */}
             <div className="flex items-center gap-2">
                <div onClickCapture={(e) => !user && (e.stopPropagation(), setShowAuth(true))}>
                  <SaveButton propertyId={data.id} className="h-10 w-10 md:w-auto md:px-4" />
@@ -274,10 +289,8 @@ export default function PropertyInspector({
             </div>
           </div>
 
-          {/* MAIN CONTENT STACK */}
           <div className="p-4 md:p-6 space-y-6 md:space-y-8">
             
-            {/* CONTACT FORM (Inline) */}
             <AnimatePresence>
               {isContactOpen && (
                 <motion.div
@@ -322,8 +335,20 @@ export default function PropertyInspector({
                           value={inquirer.message} onChange={(e) => setInquirer({...inquirer, message: e.target.value})}
                           className="w-full bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-white focus:border-emerald-500/50 focus:outline-none resize-none"
                         />
-                        <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-colors uppercase tracking-widest text-xs">
-                           <Send size={14} /> Send Request
+                        <button 
+                          type="submit" 
+                          disabled={routingLead}
+                          className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-colors uppercase tracking-widest text-xs"
+                        >
+                           {routingLead ? (
+                             <>
+                               <Loader2 size={14} className="animate-spin" /> Securing Link...
+                             </>
+                           ) : (
+                             <>
+                               <Send size={14} /> Send Request
+                             </>
+                           )}
                         </button>
                      </form>
                   </div>
@@ -331,7 +356,6 @@ export default function PropertyInspector({
               )}
             </AnimatePresence>
 
-            {/* DESCRIPTION */}
             <div className="space-y-4">
                 <div>
                   <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">The Brief</h3>
@@ -347,7 +371,6 @@ export default function PropertyInspector({
                 )}
             </div>
 
-            {/* INTEL STACK */}
             <div className="space-y-4 pt-4 border-t border-white/5">
                 <h3 className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest mb-2 flex items-center gap-2">
                     <ShieldCheck size={14} /> Field Intelligence
@@ -363,7 +386,6 @@ export default function PropertyInspector({
                 </div>
             </div>
 
-            {/* ADVISOR & FOOTER */}
             <div className="space-y-4 pb-8">
                 <IntelligenceCard key={data.id} propertyId={data.id} locationName={data.location_name} />
                 
@@ -380,7 +402,6 @@ export default function PropertyInspector({
           </div>
         </div>
 
-        {/* 2. MOBILE STICKY BOTTOM BAR (Always Visible) */}
         {!isContactOpen && (
           <div className="absolute bottom-0 left-0 w-full p-4 bg-[#0A0A0A] border-t border-white/10 backdrop-blur-xl pb-8 md:pb-4 z-50">
             <button 
