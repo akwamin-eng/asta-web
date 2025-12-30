@@ -1,76 +1,101 @@
-import { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { useState, useEffect, useMemo } from 'react';
+import { useLiveListings } from './useLiveListings';
+import { getRegionForLocation, type RegionName } from '../lib/regions';
 
-export function useMarketStats() {
-  const [stats, setStats] = useState({
-    avgPrice: 0,
-    activeListings: 0,
-    zoneStats: [] as any[],
-  });
-  const [loading, setLoading] = useState(true);
+interface ZoneStat {
+  name: string;
+  count: number;
+  avgPrice: number;
+  demandScore: number;
+}
 
-  useEffect(() => {
-    async function fetchStats() {
-      try {
-        // 1. Fetch RENTALS only for the Average Price
-        // We filter out extreme outliers (> 50k) that are likely mislabeled sales
-        const { data: rentData } = await supabase
-          .from('properties')
-          .select('price')
-          .eq('type', 'rent') 
-          .lt('price', 50000); 
+interface MarketStats {
+  activeListings: number;
+  avgPrice: number;
+  medianPrice: number;
+  avgRent: number;
+  avgSale: number;
+  zoneStats: ZoneStat[];
+  lastUpdated: string;
+}
 
-        // 2. Fetch ALL active listings for volume counts
-        const { data: allData } = await supabase
-          .from('properties')
-          .select('location_name, price, type')
-          .eq('status', 'active');
+export function useMarketStats(selectedRegion?: RegionName) {
+  const { listings, loading } = useLiveListings();
+  const [stats, setStats] = useState<MarketStats | null>(null);
 
-        if (!allData || !rentData) return;
+  const processedStats = useMemo(() => {
+    if (loading || listings.length === 0) return null;
 
-        // --- MATH SECTION ---
+    // 1. FILTER BY REGION
+    const regionListings = selectedRegion 
+      ? listings.filter(l => getRegionForLocation(l.location_name) === selectedRegion)
+      : listings;
 
-        // A. Calculate Average Rent (Reliable)
-        const totalRent = rentData.reduce((sum, item) => sum + item.price, 0);
-        const avgRent = rentData.length > 0 ? Math.round(totalRent / rentData.length) : 0;
-
-        // B. Calculate Zone Leaderboard
-        const zoneMap: Record<string, { count: number; total: number }> = {};
-        
-        allData.forEach(p => {
-          // Normalize location name (e.g. "East Legon, Accra" -> "East Legon")
-          const zone = p.location_name ? p.location_name.split(',')[0].trim() : 'Unknown';
-          
-          if (!zoneMap[zone]) zoneMap[zone] = { count: 0, total: 0 };
-          zoneMap[zone].count += 1;
-          zoneMap[zone].total += p.price;
-        });
-
-        // Convert to array and SORT DESCENDING by Count
-        const zoneStats = Object.entries(zoneMap)
-          .map(([name, data]) => ({
-            name,
-            count: data.count,
-            avgPrice: Math.round(data.total / data.count)
-          }))
-          .sort((a, b) => b.count - a.count) // High volume first
-          .slice(0, 5); // Top 5 only
-
-        setStats({
-          avgPrice: avgRent,
-          activeListings: allData.length,
-          zoneStats
-        });
-
-      } catch (err) {
-        console.error('Stats Error:', err);
-      } finally {
-        setLoading(false);
-      }
+    if (regionListings.length === 0) {
+      return {
+        activeListings: 0,
+        avgPrice: 0,
+        medianPrice: 0,
+        avgRent: 0,
+        avgSale: 0,
+        zoneStats: [],
+        lastUpdated: new Date().toISOString()
+      };
     }
 
-    fetchStats();
-  }, []);
+    // 2. CALCULATE METRICS
+    const prices = regionListings.map(l => l.price).sort((a, b) => a - b);
+    const rentListings = regionListings.filter(l => l.type === 'rent');
+    const saleListings = regionListings.filter(l => l.type === 'sale');
+
+    const totalVal = prices.reduce((acc, curr) => acc + curr, 0);
+    const avgPrice = totalVal / prices.length;
+    
+    // Median
+    const mid = Math.floor(prices.length / 2);
+    const medianPrice = prices.length % 2 !== 0 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
+
+    // Specific Avgs
+    const totalRent = rentListings.reduce((acc, curr) => acc + curr.price, 0);
+    const avgRent = rentListings.length > 0 ? totalRent / rentListings.length : 0;
+
+    const totalSale = saleListings.reduce((acc, curr) => acc + curr.price, 0);
+    const avgSale = saleListings.length > 0 ? totalSale / saleListings.length : 0;
+
+    // 3. ZONE LEADERBOARD
+    const zones: Record<string, { count: number; total: number }> = {};
+    regionListings.forEach(l => {
+      const zone = l.location_name;
+      if (!zones[zone]) zones[zone] = { count: 0, total: 0 };
+      zones[zone].count++;
+      zones[zone].total += l.price;
+    });
+
+    const zoneStats = Object.entries(zones)
+      .map(([name, data]) => ({
+        name,
+        count: data.count,
+        avgPrice: data.total / data.count,
+        demandScore: Math.min(100, data.count * 10)
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    return {
+      activeListings: regionListings.length,
+      avgPrice,
+      medianPrice,
+      avgRent,
+      avgSale,
+      zoneStats,
+      lastUpdated: new Date().toISOString()
+    };
+
+  }, [listings, loading, selectedRegion]);
+
+  useEffect(() => {
+    setStats(processedStats);
+  }, [processedStats]);
 
   return { stats, loading };
 }
