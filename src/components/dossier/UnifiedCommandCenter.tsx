@@ -4,7 +4,7 @@ import { X, Activity, Layout, Mail, Loader2, Map as MapIcon, ChevronLeft } from 
 import IdentityModule from "./IdentityModule";
 import SmartWatchlist from "./SmartWatchlist";
 import HunterPreferences from "./HunterPreferences";
-import Dashboard from "./Dashboard"; // FIXED: Now imports from same folder
+import Dashboard from "./Dashboard"; 
 import SecureInbox from "./SecureInbox";
 import OnboardingModule from "./OnboardingModule";
 import AssetClaimModal from "./AssetClaimModal"; 
@@ -38,15 +38,12 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
   const [viewMode, setViewMode] = useState<"dashboard" | "comms">("dashboard");
   const [showOnboarding, setShowOnboarding] = useState(false);
   
-  // FIX 1: Dashboard Sync Key
-  // Increments whenever data changes to force the Dashboard to re-fetch/re-render
+  // Dashboard Sync Key
   const [dashboardVersion, setDashboardVersion] = useState(0);
 
-  // FIX 2: Optimistic Read State
-  // Tracks IDs read in this session to update UI instantly before DB confirms
+  // Optimistic Read State
   const [localReadIds, setLocalReadIds] = useState<string[]>([]);
 
-  // Calculate unread count defensively, excluding locally read messages
   const unreadCount = (messages || [])
     .filter(m => m.status === 'unread' && !localReadIds.includes(m.id))
     .length;
@@ -57,22 +54,29 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
 
   const handleUpdatePreferences = async (newPrefs: any) => {
     await updatePreferences(newPrefs);
-    setDashboardVersion(v => v + 1); // Trigger Dashboard Refresh
+    setDashboardVersion(v => v + 1); 
   };
 
   const handleClaimAssets = async () => {
     await claimAssets();
-    setDashboardVersion(v => v + 1); // Trigger Dashboard Refresh
+    setDashboardVersion(v => v + 1);
   };
 
   const handleMarkAsRead = async (id: string) => {
-    setLocalReadIds(prev => [...prev, id]); // Optimistic Update
+    setLocalReadIds(prev => [...prev, id]); 
     await markAsRead(id);
   };
 
+  // --- UPDATED GATEKEEPER LOGIC ---
   useEffect(() => {
     if (profile && !loading) {
-      if (!profile.full_name || profile.full_name === 'Lead Scout' || profile.full_name === 'Observer') {
+      // TRIGGER ONBOARDING IF:
+      // 1. Name is missing or looks like a default placeholder
+      // 2. User has no "Class" (scout_segment) assigned (New logic)
+      const isDefaultName = !profile.full_name || profile.full_name === 'Lead Scout' || profile.full_name === 'Observer';
+      const isUnclassified = !profile.scout_segment;
+
+      if (isDefaultName || isUnclassified) {
         setShowOnboarding(true);
       }
     }
@@ -86,7 +90,6 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
     );
   }
 
-  // Tactical Haptic Effect Class
   const widgetHoverEffect = "transition-transform duration-300 hover:scale-[1.01] hover:shadow-[0_4px_30px_rgba(16,185,129,0.1)]";
 
   return (
@@ -127,7 +130,10 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
         {showOnboarding && (
           <OnboardingModule 
             currentName={profile?.full_name || ''} 
-            onComplete={() => setShowOnboarding(false)} 
+            onComplete={() => {
+              setShowOnboarding(false);
+              setDashboardVersion(v => v + 1); // Refresh dashboard to show new identity
+            }} 
           />
         )}
       </AnimatePresence>
@@ -136,7 +142,7 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
       {!ignoreDiscovery && discoveredCount > 0 && (
         <AssetClaimModal 
           count={discoveredCount} 
-          onClaim={handleClaimAssets} // Use Wrapper
+          onClaim={handleClaimAssets}
           onIgnore={() => setIgnoreDiscovery(true)}
           isSyncing={isSyncing} 
         />
@@ -239,7 +245,7 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
             >
               <HunterPreferences
                 preferences={preferences}
-                onUpdate={handleUpdatePreferences} // Use Wrapper
+                onUpdate={handleUpdatePreferences}
               />
             </motion.div>
 
@@ -272,7 +278,6 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
                     </div>
                   </div>
                   <div className="flex-1 w-full relative z-20">
-                     {/* FIX 2: FORCE REMOUNT ON UPDATE */}
                      <Dashboard key={dashboardVersion} />
                   </div>
                 </>
@@ -280,7 +285,7 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
                 <SecureInbox 
                   messages={messages || []} 
                   loading={intelLoading} 
-                  onRead={handleMarkAsRead} // Use Wrapper
+                  onRead={handleMarkAsRead}
                 />
               )}
             </div>
