@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Activity, Layout, Mail, Loader2, Map as MapIcon, ChevronLeft } from "lucide-react";
+import { X, Activity, Layout, Mail, Loader2, Map as MapIcon, ChevronLeft, ShieldAlert } from "lucide-react";
 import IdentityModule from "./IdentityModule";
 import SmartWatchlist from "./SmartWatchlist";
 import HunterPreferences from "./HunterPreferences";
@@ -72,7 +72,7 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
     if (profile && !loading) {
       // TRIGGER ONBOARDING IF:
       // 1. Name is missing or looks like a default placeholder
-      // 2. User has no "Class" (scout_segment) assigned (New logic)
+      // 2. User has no "Class" (scout_segment) assigned
       const isDefaultName = !profile.full_name || profile.full_name === 'Lead Scout' || profile.full_name === 'Observer';
       const isUnclassified = !profile.scout_segment;
 
@@ -132,13 +132,12 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
             currentName={profile?.full_name || ''} 
             onComplete={() => {
               setShowOnboarding(false);
-              setDashboardVersion(v => v + 1); // Refresh dashboard to show new identity
+              setDashboardVersion(v => v + 1); 
             }} 
           />
         )}
       </AnimatePresence>
 
-      {/* ASSET CLAIM MODAL (IDENTITY BRIDGE) */}
       {!ignoreDiscovery && discoveredCount > 0 && (
         <AssetClaimModal 
           count={discoveredCount} 
@@ -149,29 +148,31 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
       )}
 
       {/* --- HEADER --- */}
-      <header className="h-16 md:h-20 border-b border-white/10 flex items-center justify-between px-4 md:px-8 bg-black/60 shrink-0 z-50 backdrop-blur-md">
+      <header className="h-16 md:h-20 border-b border-white/10 flex items-center justify-between px-4 md:px-8 bg-black/80 md:bg-black/60 shrink-0 z-50 backdrop-blur-md">
         <div className="flex items-center gap-3 md:gap-8 overflow-hidden">
           <div className="flex items-center gap-2 md:gap-4 shrink-0">
             <div className="relative">
               <img src="/logo.png" alt="Asta" className="h-6 md:h-8 w-auto brightness-110" />
               <div className="absolute -inset-1 bg-emerald-500/20 blur-md rounded-full -z-10" />
             </div>
-            <div className="hidden sm:block">
+            {/* Mobile-Friendly Title Logic */}
+            <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-white font-black tracking-[0.1em] text-xs md:text-lg uppercase whitespace-nowrap">
-                  Unified Command Intelligence
+                <h1 className="text-white font-black tracking-[0.1em] text-[10px] md:text-lg uppercase whitespace-nowrap">
+                  <span className="md:hidden">Command Intel</span>
+                  <span className="hidden md:inline">Unified Command Intelligence</span>
                 </h1>
                 <span className="hidden md:inline text-[8px] bg-emerald-500/20 text-emerald-500 px-1.5 py-0.5 rounded border border-emerald-500/30 font-mono">
-                  v3.5_LIVE
+                  v3.5
                 </span>
               </div>
               <p className="hidden md:block text-[9px] text-gray-500 font-mono tracking-widest uppercase">
-                Asta Command Intelligence Layer // Security_Level: {profile?.rank_title || 'RECRUIT'}
+                Level: {profile?.rank_title || 'RECRUIT'}
               </p>
             </div>
           </div>
 
-          <div className="flex bg-white/5 rounded-lg p-1 border border-white/10 shrink-0">
+          <div className="flex bg-white/5 rounded-lg p-1 border border-white/10 shrink-0 ml-auto md:ml-0">
             <button
               onClick={() => setViewMode("dashboard")}
               className={`px-3 md:px-4 py-1.5 md:py-2 rounded text-[9px] md:text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1 md:gap-2 ${
@@ -180,7 +181,7 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
                   : "text-gray-400 hover:text-white"
               }`}
             >
-              <Layout size={12} /> <span className="hidden xs:inline">Dashboard</span>
+              <Layout size={12} /> <span className="hidden sm:inline">Dashboard</span>
             </button>
             
             <div className="relative">
@@ -194,7 +195,7 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
                       : "text-gray-400 hover:text-white"
                 }`}
               >
-                <Mail size={12} /> <span className="hidden xs:inline">Comms</span>
+                <Mail size={12} /> <span className="hidden sm:inline">Comms</span>
                 {hasUnread && (
                   <span className="absolute -top-1 -right-1 md:-top-1.5 md:-right-1.5 w-3 h-3 md:w-4 md:h-4 bg-red-500 text-white text-[7px] md:text-[9px] flex items-center justify-center rounded-full border border-black animate-pulse shadow-lg">
                     {unreadCount}
@@ -205,26 +206,23 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
           </div>
         </div>
 
-        <div className="flex items-center gap-3 md:gap-6">
+        <div className="flex items-center gap-3 md:gap-6 ml-2">
           <div className="hidden md:flex flex-col items-end shrink-0">
             <div className="flex items-center gap-2 text-[10px] text-emerald-400 font-mono">
-              <Activity size={12} className="animate-pulse" /> SYSTEM_LINK: OPTIMAL
-            </div>
-            <div className="text-[8px] text-gray-600 font-mono uppercase">
-              NODE: ACCRA_CENTRAL_INTEL
+              <Activity size={12} className="animate-pulse" /> ONLINE
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 md:p-3 hover:bg-red-500/10 rounded-xl text-gray-400 hover:text-red-500 transition-all border border-transparent hover:border-red-500/20 shrink-0"
+            className="p-2 md:p-3 hover:bg-red-500/10 rounded-xl text-gray-400 hover:text-red-500 transition-all border border-white/5 hover:border-red-500/20 shrink-0 bg-white/5"
           >
-            <X size={20} className="md:w-7 md:h-7" />
+            <X size={18} className="md:w-6 md:h-6" />
           </button>
         </div>
       </header>
 
       {/* --- MAIN CONTENT --- */}
-      <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 md:space-y-8 custom-scrollbar bg-black tactical-grid relative">
+      <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 md:space-y-8 custom-scrollbar bg-black tactical-grid relative pb-32">
         <div className="scan-line" />
         
         <div className="max-w-[1700px] mx-auto space-y-6 md:space-y-8 relative z-10">
@@ -236,7 +234,7 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
             </div>
             
             <motion.div 
-               className={`h-full rounded-2xl overflow-hidden ${widgetHoverEffect}`}
+               className={`h-auto md:h-full rounded-2xl overflow-hidden ${widgetHoverEffect}`}
                animate={initialSection === 'hunter' ? {
                  boxShadow: ["0 0 0px rgba(16, 185, 129, 0)", "0 0 25px rgba(16, 185, 129, 0.4)", "0 0 0px rgba(16, 185, 129, 0)"],
                  borderColor: ["rgba(255,255,255,0.1)", "rgba(16, 185, 129, 1)", "rgba(255,255,255,0.1)"]
@@ -249,7 +247,7 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
               />
             </motion.div>
 
-            <div className={`w-full h-[400px] md:h-auto ${widgetHoverEffect}`}>
+            <div className={`w-full h-[350px] md:h-auto ${widgetHoverEffect}`}>
               <SmartWatchlist
                 items={watchlist}
                 onRemove={removeFromWatchlist}
@@ -264,16 +262,16 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
                 <>
                   <div className="p-4 md:p-5 bg-emerald-500/5 border-b border-white/10 flex justify-between items-center relative z-20">
                     <span className="text-[9px] md:text-[11px] font-black text-emerald-500 uppercase tracking-[0.2em] md:tracking-[0.4em] flex items-center gap-2 md:gap-3">
-                      <Activity size={14} className="animate-pulse" /> Market Matrix
+                      <ShieldAlert size={14} className="animate-pulse" /> Market Matrix
                     </span>
                     <div className="flex gap-3 md:gap-6">
                        <div className="hidden sm:flex flex-col items-end">
-                         <span className="text-[9px] font-mono text-emerald-500/50 uppercase">Data_Stream</span>
-                         <span className="text-[10px] font-mono text-emerald-400 animate-pulse uppercase">ENCRYPTED_ACTIVE</span>
+                         <span className="text-[9px] font-mono text-emerald-500/50 uppercase">Stream</span>
+                         <span className="text-[10px] font-mono text-emerald-400 animate-pulse uppercase">LIVE</span>
                        </div>
                        <div className="flex flex-col items-end">
-                         <span className="text-[8px] md:text-[9px] font-mono text-gray-600 uppercase">Latency</span>
-                         <span className="text-[9px] md:text-[10px] font-mono text-gray-400">14MS</span>
+                         <span className="text-[8px] md:text-[9px] font-mono text-gray-600 uppercase">Ping</span>
+                         <span className="text-[9px] md:text-[10px] font-mono text-gray-400">14ms</span>
                        </div>
                     </div>
                   </div>
@@ -292,16 +290,15 @@ export default function UnifiedCommandCenter({ onClose, initialSection = 'dashbo
           </div>
         </div>
 
-        {/* --- BACK TO MAP BUTTON (CENTER BOTTOM) --- */}
-        <div className="pb-20 md:pb-12 pt-4 md:pt-8 flex justify-center sticky bottom-0 pointer-events-none z-50">
+        {/* --- BACK TO MAP BUTTON (STICKY FOOTER) --- */}
+        <div className="fixed bottom-0 left-0 right-0 p-4 pb-8 md:pb-8 flex justify-center bg-gradient-to-t from-black via-black/90 to-transparent z-[60] pointer-events-none">
           <button
             onClick={onClose}
-            className="pointer-events-auto group flex items-center gap-2 md:gap-3 px-6 md:px-8 py-2.5 md:py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full font-black text-[10px] md:text-xs uppercase tracking-[0.1em] md:tracking-[0.2em] shadow-[0_10px_30px_rgba(16,185,129,0.3)] transition-all hover:-translate-y-1 active:translate-y-0 border border-emerald-400/50"
+            className="pointer-events-auto group flex items-center gap-2 md:gap-3 px-8 md:px-10 py-3 md:py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full font-black text-[10px] md:text-xs uppercase tracking-[0.15em] shadow-[0_10px_40px_rgba(16,185,129,0.4)] transition-all hover:-translate-y-1 active:translate-y-0 border border-emerald-400/50 backdrop-blur-md"
           >
-            <ChevronLeft size={14} className="md:w-4 md:h-4 group-hover:-translate-x-1 transition-transform" />
-            <span className="sm:inline">Return to Map</span>
-            <span className="inline sm:hidden">Map</span>
-            <MapIcon size={14} className="md:w-4 md:h-4" />
+            <ChevronLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
+            <span>Return to Map</span>
+            <MapIcon size={16} />
           </button>
         </div>
       </main>
