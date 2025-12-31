@@ -201,15 +201,6 @@ export default function AstaMap() {
   const dossierSection = (searchParams.get('section') as "dashboard" | "hunter") || "dashboard";
   const urlListingId = searchParams.get('listing_id');
 
-  // --- MOBILE DETECTION ---
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-  
-  useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
   const [hunterPreferences, setHunterPreferences] = useState<{
     property_type: string[];
     lifestyle_tags: string[];
@@ -409,21 +400,28 @@ export default function AstaMap() {
     if (label === "Luxury") { setMinPrice("500000"); setMaxPrice(""); }
   };
 
+  // --- REFINED FILTERING ENGINE (FIXED NULL CHECKS) ---
   const filteredListings = useMemo(() => {
     return listings.filter((l) => {
-      if (!l.price || l.lat === 0) return false;
+      // 1. Data Integrity Check
+      if (!l.price || !l.lat || !l.long) return false;
+
+      // 2. Basic Type & Price
       const matchesType = filterType === "all" || l.type === filterType;
       const price = l.price;
       const min = minPrice ? parseFloat(minPrice) : 0;
       const max = maxPrice ? parseFloat(maxPrice) : Infinity;
       const matchesPrice = price >= min && price <= max;
 
+      // 3. Asset Class (Hunter Directive) - FAILSAFE
       let matchesAssetClass = true;
       if (hunterPreferences?.property_type && hunterPreferences.property_type.length > 0) {
-        const pClass = (l.property_class || '').toLowerCase();
+        // Fallback to 'house' if DB column is missing/null so we don't hide everything
+        const pClass = (l.property_class || 'house').toLowerCase();
         matchesAssetClass = hunterPreferences.property_type.some(t => pClass.includes(t.toLowerCase()));
       }
 
+      // 4. Operational Context (Hunter Lifestyle) - FAILSAFE
       let matchesLifestyle = true;
       if (hunterPreferences?.lifestyle_tags && hunterPreferences.lifestyle_tags.length > 0) {
         const vibes = (l.vibe_features || '').toLowerCase();
@@ -436,9 +434,11 @@ export default function AstaMap() {
         });
       }
 
+      // 5. Trust Radar
       let matchesTrust = true;
       if (showTrustRadar) matchesTrust = l.location_accuracy === "high";
 
+      // 6. Drawing
       let matchesGeo = true;
       if (drawPolygon) {
         const pt = turf.point([l.long, l.lat]);
@@ -528,14 +528,9 @@ export default function AstaMap() {
 
         <NavigationControl position="bottom-right" className="!hidden md:!block" />
         <FullscreenControl position="bottom-right" className="!hidden md:!block" />
-        
-        {/* POLISH 1: Conditional Render of DrawControl */}
-        {!isMobile && (
-          <DrawControl position="top-right" displayControlsDefault={false} controls={{ polygon: true, trash: true }} defaultMode="simple_select" onUpdate={onDrawUpdate} onDelete={onDrawDelete} />
-        )}
+        <DrawControl position="top-right" displayControlsDefault={false} controls={{ polygon: true, trash: true }} defaultMode="simple_select" onUpdate={onDrawUpdate} onDelete={onDrawDelete} />
 
-        {/* POLISH 2: Mobile Positioning for Custom Controls */}
-        <div className={`absolute right-4 flex flex-col gap-2 z-10 ${isMobile ? 'top-20' : 'top-4 md:bottom-32 md:top-auto md:right-[10px]'}`}>
+        <div className="absolute top-4 right-4 md:bottom-32 md:top-auto md:right-[10px] flex flex-col gap-2 z-10">
           <button onClick={getCurrentLocation} className="w-[29px] h-[29px] bg-white rounded-md shadow flex items-center justify-center hover:bg-emerald-50 text-emerald-600 border border-gray-300 transition-colors" title="Locate Me (GPS)">
             {gpsLoading ? <Loader2 size={16} className="animate-spin" /> : <Crosshair size={16} />}
           </button>

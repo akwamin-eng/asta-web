@@ -12,6 +12,7 @@ export interface Property {
   location_accuracy: 'high' | 'low';
   vibe_features: string | string[];
   description: string;
+  property_class?: string; // Added field
   type: 'sale' | 'rent';
   cover_image_url?: string;
   images?: string[];
@@ -30,7 +31,6 @@ export function useLiveListings() {
   useEffect(() => {
     fetchListings();
 
-    // Subscribe to realtime changes
     const subscription = supabase
       .channel('public:properties')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'properties' }, () => {
@@ -45,6 +45,7 @@ export function useLiveListings() {
 
   async function fetchListings() {
     try {
+      // 1. Fetch 'property_class' to ensure filtering works
       const { data, error } = await supabase
         .from('properties')
         .select(`
@@ -59,6 +60,7 @@ export function useLiveListings() {
           vibe_features,
           description,
           description_enriched,
+          property_class, 
           type,
           cover_image_url,
           property_images(url),
@@ -67,15 +69,16 @@ export function useLiveListings() {
           source
         `)
         .eq('status', 'active')
-        // FILTER: Hide Intelligence Seeds from the frontend Map
         .neq('source', 'internal_migration')
         .neq('source', 'scraper_import');
 
       if (error) throw error;
 
-      // Normalize data structure
+      // 2. Data Normalization & Fallbacks
       const normalized = (data || []).map((p: any) => ({
         ...p,
+        // Fallback: If DB missing class, assume 'House' so it shows on map
+        property_class: p.property_class || 'House', 
         vibe_features: typeof p.vibe_features === 'string' 
           ? p.vibe_features 
           : JSON.stringify(p.vibe_features || []),
