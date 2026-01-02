@@ -21,6 +21,7 @@ import { useSearchParams } from "react-router-dom";
 import {
   Sun,
   Moon,
+  Globe,
   Layers,
   RotateCcw,
   MapPin,
@@ -37,7 +38,8 @@ import {
   BellRing,
   Crosshair,
   Shield,
-  Send, // 👈 Added missing import
+  Send,
+  Zap, // 🟢 Added Zap for loader
 } from "lucide-react";
 import { useLiveListings } from "../hooks/useLiveListings";
 import { useAuth } from "../hooks/useAuth";
@@ -139,6 +141,7 @@ const clusterCountLayer: any = {
     "text-size": 12,
   },
 };
+// Thicker stroke for satellite visibility
 const unclusteredPointLayer: any = {
   id: "unclustered-point",
   type: "circle",
@@ -147,7 +150,7 @@ const unclusteredPointLayer: any = {
   paint: {
     "circle-color": "#10b981",
     "circle-radius": 8,
-    "circle-stroke-width": 2,
+    "circle-stroke-width": 3,
     "circle-stroke-color": "#ffffff",
   },
 };
@@ -167,7 +170,7 @@ const priceLabelLayer: any = {
   paint: {
     "text-color": "#ffffff",
     "text-halo-color": "#000000",
-    "text-halo-width": 1,
+    "text-halo-width": 1.5,
   },
 };
 
@@ -197,11 +200,12 @@ interface Suggestion {
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 const ENGINE_URL = "http://127.0.0.1:8000";
 const INITIAL_VIEW_STATE = { longitude: -0.187, latitude: 5.6037, zoom: 11 };
+// 🟢 OPTIMIZATION: Restrict Bounds
+const GHANA_BOUNDS: [number, number, number, number] = [-3.5, 4.5, 1.5, 11.5];
 
 export default function AstaMap() {
-  const { listings } = useLiveListings();
+  const { listings, refresh: refreshListings } = useLiveListings(); // 🟢 Grab Refresh
   const { user } = useAuth();
-  // Hooks kept as is
   const {
     reverseGeocode,
     searchPlace,
@@ -218,25 +222,43 @@ export default function AstaMap() {
     getPredictions: fetchGooglePredictions,
     loading: autocompleteLoading,
   } = useGoogleAutocomplete();
-
   const [searchParams, setSearchParams] = useSearchParams();
+
   const isProfileOpen = searchParams.get("mode") === "dossier";
   const dossierSection =
-    (searchParams.get("section") as "dashboard" | "hunter") || "dashboard";
+    (searchParams.get("section") as "dashboard" | "hunter" | "assets") ||
+    "dashboard";
   const urlListingId = searchParams.get("listing_id");
+
+  const [isSelectingLocation, setIsSelectingLocation] = useState(false);
+  const [isMapLoaded, setIsMapLoaded] = useState(false); // 🟢 Premium Loading State
 
   const [hunterPreferences, setHunterPreferences] = useState<{
     property_type: string[];
     lifestyle_tags: string[];
   }>({ property_type: [], lifestyle_tags: [] });
 
-  const openDossier = (section: "dashboard" | "hunter") => {
+  const openDossier = (section: "dashboard" | "hunter" | "assets") => {
     setSearchParams({ mode: "dossier", section });
   };
 
   const closeDossier = () => {
     setSearchParams({});
+    // 🟢 SYNC FIX: Force refresh when returning to map
+    refreshListings();
     if (user) fetchUserPreferences();
+  };
+
+  // 🟢 DOUBLE SYNC FIX: Also refresh when `isProfileOpen` changes to false
+  useEffect(() => {
+    if (!isProfileOpen) {
+      refreshListings();
+    }
+  }, [isProfileOpen]);
+
+  const handleStartTargeting = () => {
+    setSearchParams({});
+    setIsSelectingLocation(true);
   };
 
   const fetchUserPreferences = async () => {
@@ -282,7 +304,12 @@ export default function AstaMap() {
   const [minPrice, setMinPrice] = useState<string>("");
   const [maxPrice, setMaxPrice] = useState<string>("");
   const [drawPolygon, setDrawPolygon] = useState<any>(null);
-  const [mapStyle, setMapStyle] = useState("mapbox://styles/mapbox/dark-v11");
+
+  // 🟢 Default to Satellite
+  const [mapStyle, setMapStyle] = useState(
+    "mapbox://styles/mapbox/satellite-streets-v12"
+  );
+
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [showTrustRadar, setShowTrustRadar] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
@@ -302,18 +329,26 @@ export default function AstaMap() {
 
   const mapRef = useRef<any>(null);
 
+  // 🟢 SMOOTH FLY-TO EFFECT
+  useEffect(() => {
+    if (selectedListing && selectedListing.lat && selectedListing.long) {
+      if (mapRef.current) {
+        mapRef.current.flyTo({
+          center: [selectedListing.long, selectedListing.lat],
+          zoom: 16,
+          pitch: 45,
+          duration: 1500,
+        });
+      }
+    }
+  }, [selectedListing]);
+
+  // Handle URL listing ID
   useEffect(() => {
     if (urlListingId && listings.length > 0) {
       const prop = listings.find((l) => l.id.toString() === urlListingId);
-      if (prop && prop.lat && prop.long) {
+      if (prop) {
         setSelectedListing(prop);
-        if (mapRef.current) {
-          mapRef.current.flyTo({
-            center: [prop.long, prop.lat],
-            zoom: 16,
-            duration: 2000,
-          });
-        }
       }
     }
   }, [urlListingId, listings]);
@@ -354,10 +389,11 @@ export default function AstaMap() {
     mapRef.current?.flyTo({
       center: [INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude],
       zoom: INITIAL_VIEW_STATE.zoom,
+      pitch: 0,
+      bearing: 0,
       duration: 1500,
     });
   };
-
   const handleDashboardReset = () => {
     handleReset();
   };
@@ -392,17 +428,19 @@ export default function AstaMap() {
       feedbackText.toLowerCase().includes("login") ||
       feedbackText.toLowerCase().includes("broke");
     try {
-      const { error } = await supabase.from("bug_reports").insert({
-        description: feedbackText,
-        category: feedbackType,
-        priority: isCritical ? "critical" : "normal",
-        user_id: user?.id || null,
-        metadata: {
-          url: window.location.href,
-          userAgent: navigator.userAgent,
-          map_context: { center, zoom, last_search: searchQuery },
-        },
-      });
+      const { error } = await supabase
+        .from("bug_reports")
+        .insert({
+          description: feedbackText,
+          category: feedbackType,
+          priority: isCritical ? "critical" : "normal",
+          user_id: user?.id || null,
+          metadata: {
+            url: window.location.href,
+            userAgent: navigator.userAgent,
+            map_context: { center, zoom, last_search: searchQuery },
+          },
+        });
       if (!error) {
         setFeedbackText("");
         setShowFeedback(false);
@@ -426,7 +464,6 @@ export default function AstaMap() {
         const feats = l.features ? l.features.join(" ") : "";
         return feats.toLowerCase().includes(item.value.toLowerCase());
       });
-
       if (matches.length > 0) {
         const validPoints = matches
           .filter((m) => m.lat && m.long)
@@ -507,7 +544,6 @@ export default function AstaMap() {
     if (!q) return;
     selectSuggestion({ type: "location", value: q });
   };
-
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setSearchQuery(val);
@@ -566,19 +602,15 @@ export default function AstaMap() {
       setMaxPrice("");
     }
   };
-
   const filteredListings = useMemo(() => {
     return listings.filter((l) => {
-      // 🛡️ CRITICAL GUARDRAIL: Prevent map crashes
       if (!l.price || typeof l.lat !== "number" || typeof l.long !== "number")
         return false;
-
       const matchesType = filterType === "all" || l.type === filterType;
       const price = l.price;
       const min = minPrice ? parseFloat(minPrice) : 0;
       const max = maxPrice ? parseFloat(maxPrice) : Infinity;
       const matchesPrice = price >= min && price <= max;
-
       let matchesAssetClass = true;
       if (
         hunterPreferences?.property_type &&
@@ -589,7 +621,6 @@ export default function AstaMap() {
           pClass.toLowerCase().includes(t.toLowerCase())
         );
       }
-
       let matchesLifestyle = true;
       if (
         hunterPreferences?.lifestyle_tags &&
@@ -608,16 +639,13 @@ export default function AstaMap() {
           return vibes.includes(cleanTag);
         });
       }
-
       let matchesTrust = true;
       if (showTrustRadar) matchesTrust = l.location_accuracy === "high";
-
       let matchesGeo = true;
       if (drawPolygon) {
         const pt = turf.point([l.long, l.lat]);
         matchesGeo = turf.booleanPointInPolygon(pt, drawPolygon);
       }
-
       return (
         matchesType &&
         matchesGeo &&
@@ -636,7 +664,6 @@ export default function AstaMap() {
     showTrustRadar,
     hunterPreferences,
   ]);
-
   const geojsonData: FeatureCollection = useMemo(() => {
     return {
       type: "FeatureCollection",
@@ -653,6 +680,11 @@ export default function AstaMap() {
   }, [filteredListings]);
 
   const onClickMap = (event: any) => {
+    if (isSelectingLocation) {
+      setDraftLocation({ lat: event.lngLat.lat, long: event.lngLat.lng });
+      setIsSelectingLocation(false);
+      return;
+    }
     const feature = event.features?.[0];
     if (!feature) {
       if (selectedListing) setSelectedListing(null);
@@ -678,7 +710,6 @@ export default function AstaMap() {
       feature.layer.id === "price-label"
     ) {
       const propId = feature.properties.id;
-      // Loose comparison (==) handles string/number mismatch from GeoJSON properties
       const property = listings.find((l) => l.id == propId);
       if (property) setSelectedListing(property);
     }
@@ -689,7 +720,6 @@ export default function AstaMap() {
     []
   );
   const onDrawDelete = useCallback(() => setDrawPolygon(null), []);
-
   const sidebarVariants = {
     desktop: {
       x: isSidebarHovered ? 0 : -360,
@@ -697,19 +727,53 @@ export default function AstaMap() {
     },
     mobile: { y: isMobileExpanded ? 0 : "calc(100% - 100px)", opacity: 1 },
   };
+  const handleStyleToggle = () => {
+    setMapStyle((current) => {
+      if (current.includes("satellite"))
+        return "mapbox://styles/mapbox/dark-v11";
+      if (current.includes("dark")) return "mapbox://styles/mapbox/streets-v12";
+      return "mapbox://styles/mapbox/satellite-streets-v12";
+    });
+  };
 
   return (
     <div className="relative h-screen w-full bg-asta-deep font-sans overflow-hidden">
+      {/* 🟢 PREMIUM PRE-LOADER */}
+      <AnimatePresence>
+        {!isMapLoaded && (
+          <motion.div
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 1 }}
+            className="absolute inset-0 z-[100] bg-[#050505] flex items-center justify-center"
+          >
+            <div className="text-center">
+              <Zap
+                size={48}
+                className="text-emerald-500 mx-auto mb-4 animate-pulse"
+              />
+              <h2 className="text-white font-bold tracking-[0.3em] text-sm animate-pulse">
+                SYSTEM INITIALIZING
+              </h2>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <Map
         ref={mapRef}
         initialViewState={INITIAL_VIEW_STATE}
-        style={{ width: "100%", height: "100%" }}
+        style={{ width: "100%", height: "100%", touchAction: "none" }}
         mapStyle={mapStyle}
         mapboxAccessToken={MAPBOX_TOKEN}
         interactiveLayerIds={["clusters", "unclustered-point", "price-label"]}
         onClick={onClickMap}
-        reuseMaps={true} // 👈 1. PREVENTS MEMORY LEAKS & RE-RENDER JITTER
-        preserveDrawingBuffer={true} // 👈 2. PREVENTS WHITE FLASHES
+        reuseMaps={true}
+        preserveDrawingBuffer={true}
+        cursor={isSelectingLocation ? "crosshair" : "auto"}
+        maxBounds={GHANA_BOUNDS as any} // 🟢 LIMIT WORLD
+        renderWorldCopies={false}
+        onLoad={() => setTimeout(() => setIsMapLoaded(true), 1000)} // 🟢 FADE LOADER
         onContextMenu={(e) => {
           e.preventDefault();
           if (user) setDraftLocation({ lat: e.lngLat.lat, long: e.lngLat.lng });
@@ -722,7 +786,6 @@ export default function AstaMap() {
             <Layer {...boundaryLayer} />
           </Source>
         )}
-
         <Source
           id="listings"
           type="geojson"
@@ -737,6 +800,31 @@ export default function AstaMap() {
           <Layer {...unclusteredPointLayer} />
           <Layer {...priceLabelLayer} />
         </Source>
+
+        <AnimatePresence>
+          {isSelectingLocation && (
+            <motion.div
+              initial={{ y: -50, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -50, opacity: 0 }}
+              className="absolute top-8 left-0 right-0 z-50 flex justify-center pointer-events-none"
+            >
+              <div className="bg-emerald-500 text-black px-6 py-3 rounded-full font-black uppercase tracking-widest shadow-[0_0_30px_rgba(16,185,129,0.5)] flex items-center gap-3 animate-pulse">
+                <Crosshair size={20} className="animate-spin-slow" />
+                <span>Targeting Mode Active</span>
+                <span className="text-[10px] bg-black text-white px-2 py-1 rounded">
+                  Click Map to Set Coordinates
+                </span>
+                <button
+                  onClick={() => setIsSelectingLocation(false)}
+                  className="pointer-events-auto bg-black/20 hover:bg-black/40 rounded-full p-1"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {draftLocation && (
           <Marker
@@ -812,17 +900,17 @@ export default function AstaMap() {
             <RotateCcw size={16} />
           </button>
           <button
-            onClick={() =>
-              setMapStyle((s) =>
-                s.includes("dark")
-                  ? "mapbox://styles/mapbox/streets-v12"
-                  : "mapbox://styles/mapbox/dark-v11"
-              )
-            }
+            onClick={handleStyleToggle}
             className="w-[29px] h-[29px] bg-white rounded-md shadow flex items-center justify-center hover:bg-gray-100 text-black border border-gray-300"
-            title="Toggle Map Theme"
+            title="Toggle Map Theme: Satellite / Dark / Streets"
           >
-            {mapStyle.includes("dark") ? <Sun size={16} /> : <Moon size={16} />}
+            {mapStyle.includes("satellite") ? (
+              <Globe size={16} />
+            ) : mapStyle.includes("dark") ? (
+              <Moon size={16} />
+            ) : (
+              <Sun size={16} />
+            )}
           </button>
           <button
             onClick={() => {
@@ -868,6 +956,7 @@ export default function AstaMap() {
           </button>
         </div>
 
+        {/* ... Sidebar, Modals, etc. (Kept same) ... */}
         <motion.div
           onHoverStart={() => setIsSidebarHovered(true)}
           onHoverEnd={() => setIsSidebarHovered(false)}
@@ -1063,6 +1152,7 @@ export default function AstaMap() {
           </div>
         </motion.div>
 
+        {/* FEEDBACK MODAL (Kept same) */}
         <AnimatePresence>
           {showFeedback && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -1156,6 +1246,7 @@ export default function AstaMap() {
             <UnifiedCommandCenter
               onClose={closeDossier}
               initialSection={dossierSection}
+              onRequestDeploy={handleStartTargeting}
             />
           )}
         </AnimatePresence>
@@ -1213,7 +1304,6 @@ export default function AstaMap() {
             </motion.div>
           )}
         </AnimatePresence>
-
         <AnimatePresence>
           {verifyingProp && (
             <FieldReportModal
@@ -1224,19 +1314,29 @@ export default function AstaMap() {
             />
           )}
         </AnimatePresence>
+
+        {/* NEW: Snappy Listing Flow */}
         <AnimatePresence>
           {submitLocation && (
             <SubmitIntelModal
               location={submitLocation}
               onClose={() => setSubmitLocation(null)}
               onSuccess={() => {
-                alert(
-                  "Intelligence received. Asset is now active on the grid."
-                );
+                const loc = submitLocation;
+                setSubmitLocation(null);
+                if (mapRef.current) {
+                  mapRef.current.flyTo({
+                    center: [loc.long, loc.lat],
+                    zoom: 16,
+                    duration: 2000,
+                  });
+                }
+                openDossier("assets");
               }}
             />
           )}
         </AnimatePresence>
+
         <div className="absolute bottom-6 left-0 right-0 text-center pointer-events-none z-10 hidden md:block">
           <p className="text-[10px] text-white/40 font-mono tracking-widest uppercase shadow-black drop-shadow-md">
             Made with <span className="text-red-500">♥</span> for Ghana
