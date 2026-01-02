@@ -26,10 +26,18 @@ export function useMarketStats(selectedRegion?: RegionName) {
   const processedStats = useMemo(() => {
     if (loading || listings.length === 0) return null;
 
+    // 0. SANITIZE DATA (The Source Fix)
+    // We map over listings to ensure no field is null before processing.
+    // This fixes the crash where 'location_name' was null from WhatsApp drafts.
+    const safeListings = listings.map(l => ({
+      ...l,
+      location_name: l.location_name || 'Unmapped Location' 
+    }));
+
     // 1. FILTER BY REGION
     const regionListings = selectedRegion 
-      ? listings.filter(l => getRegionForLocation(l.location_name) === selectedRegion)
-      : listings;
+      ? safeListings.filter(l => getRegionForLocation(l.location_name) === selectedRegion)
+      : safeListings;
 
     if (regionListings.length === 0) {
       return {
@@ -65,7 +73,7 @@ export function useMarketStats(selectedRegion?: RegionName) {
     // 3. ZONE LEADERBOARD
     const zones: Record<string, { count: number; total: number }> = {};
     regionListings.forEach(l => {
-      const zone = l.location_name;
+      const zone = l.location_name; // Now guaranteed to be a string
       if (!zones[zone]) zones[zone] = { count: 0, total: 0 };
       zones[zone].count++;
       zones[zone].total += l.price;
