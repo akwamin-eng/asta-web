@@ -37,6 +37,7 @@ import {
   BellRing,
   Crosshair,
   Shield,
+  Send, // 👈 Added missing import
 } from "lucide-react";
 import { useLiveListings } from "../hooks/useLiveListings";
 import { useAuth } from "../hooks/useAuth";
@@ -52,7 +53,7 @@ import UnifiedCommandCenter from "./dossier/UnifiedCommandCenter";
 import FieldReportModal from "./dossier/FieldReportModal";
 import SubmitIntelModal from "./dossier/SubmitIntelModal";
 import type { FeatureCollection } from "geojson";
-import type { Property } from "../types/schema"; // 👈 Centralized Schema Import
+import type { Property } from "../types/schema";
 
 // --- STYLES ---
 const boundaryLayer: any = {
@@ -200,6 +201,7 @@ const INITIAL_VIEW_STATE = { longitude: -0.187, latitude: 5.6037, zoom: 11 };
 export default function AstaMap() {
   const { listings } = useLiveListings();
   const { user } = useAuth();
+  // Hooks kept as is
   const {
     reverseGeocode,
     searchPlace,
@@ -706,6 +708,8 @@ export default function AstaMap() {
         mapboxAccessToken={MAPBOX_TOKEN}
         interactiveLayerIds={["clusters", "unclustered-point", "price-label"]}
         onClick={onClickMap}
+        reuseMaps={true} // 👈 1. PREVENTS MEMORY LEAKS & RE-RENDER JITTER
+        preserveDrawingBuffer={true} // 👈 2. PREVENTS WHITE FLASHES
         onContextMenu={(e) => {
           e.preventDefault();
           if (user) setDraftLocation({ lat: e.lngLat.lat, long: e.lngLat.lng });
